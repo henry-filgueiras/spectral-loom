@@ -92,6 +92,7 @@ published before the hub client is even imported. See [scripts/README.md](script
 ./loom generate corpus/specs/example.yaml
 ./loom accept sparse-funk-exposed-bass --reviewer Henry --reviewed-on 2026-08-20 ...
 ./loom separate sparse-funk-exposed-bass
+./loom review-separation sparse-funk-exposed-bass
 ```
 
 `generate` is the only expensive command and the only one that needs the cabinet environment. It
@@ -114,6 +115,20 @@ being overwritten.
 The stems are named `bass`, `drums`, `other`, `vocals` because **those are HTDemucs' own output
 names**, not because anything verified what is in them. A near-silent `vocals.wav` is a failure to
 assign, never proof that nobody sang.
+
+`review-separation` builds the **Stem Observatory** and opens it: one local page in which the
+source mix, every model output, and the engineering diagnostics share a single Web Audio transport
+clock, so solo, mute, loop and A/B comparison mean something. Independently running `<audio>`
+elements drift, and two lanes that drift are two lanes you cannot compare. Lanes are labelled
+`HTDemucs · bass`, provenance sits behind a disclosure, and the residual is presented as a
+diagnostic with a number rather than a verdict. It writes an ignored page under
+`corpus/derived/<specimen>/review/`, serves it on loopback only from a fixed whitelist of files,
+makes no request that leaves the machine, and records no verdict — gate 3 is passed by listening.
+
+```text
+space play/pause   0 source   1-4 solo one output   A all four outputs
+M rendered sum     R residual   [ ] loop bounds     <- -> seek 5 s    esc clear
+```
 
 `accept` records what a person decided after listening. It runs no model and reads no audio beyond
 hashing it, and the hash is the point: a specimen id names an *intent* and survives regeneration,

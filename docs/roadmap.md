@@ -47,9 +47,17 @@ established — nobody has analysed the audio, and a listener's ear is not a mea
 `archaeology/decisions/0010` for why the acceptance is keyed by hash rather than by specimen id,
 and why a human judgement is not one of the four truth layers.
 
-## Gate 3 — Separation, inspected
+## Gate 3 — Separation, inspected ⏳
 
 Separate the accepted specimen with Demucs. Listen to the stems.
+
+**Where it stands:** the separation stage exists, refuses to run on bytes no human accepted, and
+has been run once on the accepted specimen — 2.8 s on MPS, four outputs at 44.1 kHz stereo, zero
+temporal offset between the summed outputs and the source, a residual 30.1 dB below it, and no
+warnings. The Stem Observatory exists so the result can be auditioned on one transport clock
+rather than in five unrelated files. **Nobody has heard the stems.** The gate is not passed by
+producing them, and the numbers above are engineering diagnostics rather than evidence about the
+music.
 
 **Passes when:** the stems have been heard, and the record says whether the bass is actually
 isolated or whether the separation smeared it — because every later inference reads these files,

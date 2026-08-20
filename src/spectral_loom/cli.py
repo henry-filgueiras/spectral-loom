@@ -8,12 +8,17 @@ Four commands. Three of them inspect and validate; one of them runs a model::
     spectral-loom generate PATH [--json] [--force]
     spectral-loom accept SPECIMEN --reviewer NAME --reviewed-on DATE ...
     spectral-loom separate SPECIMEN [--device mps|cpu] [--json] [--force]
+    spectral-loom review-separation SPECIMEN [--port N] [--no-open]
 
 ``generate`` and ``separate`` are expensive and need the cabinet environment.
 Neither downloads:
 weights are a precondition a human establishes with
 ``scripts/bootstrap_cabinet.py``, and generation that quietly fetches eleven
 gigabytes is not a pipeline stage, it is a surprise.
+
+``review-separation`` is the instrument for gate 3: it builds a local, loopback-
+only page in which every stem shares one transport clock, and then gets out of
+the way. It runs no model.
 
 ``accept`` is the opposite kind of command: it runs no model and produces no
 audio. It writes down what a person decided after listening, bound to the exact
@@ -83,14 +88,24 @@ from spectral_loom.generate import (
 )
 from spectral_loom.generate import generate as run_generation
 from spectral_loom.hashing import hash_file
+from spectral_loom.observatory import (
+    ObservatoryError,
+    build_exhibit,
+    render,
+    serve,
+    write_page,
+)
 from spectral_loom.review import (
     GATE_2_CRITERIA,
     ReviewError,
     build_review,
+    require_accepted,
     review_path,
     write_review,
 )
-from spectral_loom.separate import SeparationError
+from spectral_loom.separate import DERIVED_DIRNAME as SEPARATION_DERIVED
+from spectral_loom.separate import SEPARATION_DIRNAME, SEPARATION_MANIFEST_FILENAME, SeparationError
+from spectral_loom.separate import load_manifest as load_separation
 from spectral_loom.separate import plan as plan_separation
 from spectral_loom.separate import run as run_separation
 
@@ -909,6 +924,118 @@ def _print_separation(manifest: SeparationManifest, *, produced: bool, specimen_
 
 
 # ---------------------------------------------------------------------------
+# review-separation
+# ---------------------------------------------------------------------------
+
+#: What a person is being asked to listen for, printed beside the URL because
+#: an instrument without a question is just a toy. Tailored to the outputs
+#: HTDemucs actually emits and phrased so that none of it presumes an answer.
+REVIEW_QUESTIONS: dict[str, tuple[str, ...]] = {
+    "bass": (
+        "Is the bass line clearly isolated?",
+        "How much guitar or kick-drum leakage is present?",
+        "Are attacks smeared or missing?",
+        "Does the bass disappear during phrases where it is audible in the source?",
+    ),
+    "drums": (
+        "Are kick, snare, and cymbal information coherent?",
+        "Is melodic material leaking into it?",
+        "Are transients damaged?",
+    ),
+    "other": (
+        "Is the clean guitar represented clearly?",
+        "Is substantial bass or drum content incorrectly assigned here?",
+        "Does the stem contain anything surprising?",
+    ),
+    "vocals": (
+        "Is this stem effectively empty or ambient?",
+        "Has Demucs placed guitar or another instrument into it?",
+        "Is there any voice-like content that was difficult to notice in the mix?",
+    ),
+}
+
+WHOLE_SEPARATION_QUESTIONS: tuple[str, ...] = (
+    "Does the reconstructed mix retain the original character?",
+    "Is there obvious phase damage, pumping, or missing material?",
+    "Are these stems good enough to become evidence inputs for activity/onset inference?",
+)
+
+
+def review_separation_command(
+    specimen_id: str,
+    *,
+    port: int,
+    open_browser: bool,
+    print_only: bool,
+    root: Path | None = None,
+) -> int:
+    """Build the Stem Observatory and hand it to a person.
+
+    The command's job ends at "here is the page and here is what to listen
+    for". It does not record a verdict, because gate 3's verdict is not
+    something a program can produce, and a command that offered to write one
+    would be inviting exactly the conflation this project exists to avoid.
+    """
+    repo = find_repository_root(root or Path.cwd())
+    manifest_path = (
+        repo / SEPARATION_DERIVED / specimen_id / SEPARATION_DIRNAME / SEPARATION_MANIFEST_FILENAME
+    )
+    if not manifest_path.is_file():
+        return _report_failure(
+            as_json=False,
+            code=EXIT_BLOCKED,
+            path=specimen_id,
+            messages=[
+                f"no separation manifest at {manifest_path}. Run "
+                f"`spectral-loom separate {specimen_id}` first; there is nothing to review."
+            ],
+        )
+
+    try:
+        manifest = load_separation(manifest_path)
+        review, _ = require_accepted(repo, specimen_id, manifest.source_audio.hash)
+        exhibit = build_exhibit(manifest, review, repo)
+    except (SeparationError, ReviewError, ObservatoryError) as exc:
+        return _report_failure(False, EXIT_BLOCKED, specimen_id, [str(exc)])
+
+    page = render(exhibit)
+    written = write_page(repo, specimen_id, page)
+
+    _print_review_checklist(manifest.separator.sources)
+    print(f"page        {written}")
+    print()
+
+    if print_only:
+        return EXIT_OK
+
+    try:
+        serve(exhibit, page, port=port, open_browser=open_browser)
+    except ObservatoryError as exc:
+        return _report_failure(False, EXIT_BLOCKED, specimen_id, [str(exc)])
+    return EXIT_OK
+
+
+def _print_review_checklist(sources: list[str]) -> None:
+    """Print what gate 3 is asking, per output the separator actually emitted."""
+    print()
+    print("Gate 3 is passed by listening. These are the questions, per model output —")
+    print("and the output names are the separator's own labels, not verified instruments.")
+    print()
+    for name in sources:
+        questions = REVIEW_QUESTIONS.get(name)
+        print(f"  {name}")
+        if questions is None:
+            print("    (no tailored questions for this output; describe what you hear)")
+        for question in questions or ():
+            print(f"    - {question}")
+        print()
+    print("  whole separation")
+    for question in WHOLE_SEPARATION_QUESTIONS:
+        print(f"    - {question}")
+    print()
+
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -1049,6 +1176,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     separate_parser.add_argument("--json", action="store_true", help="machine-readable output")
 
+    observatory_parser = subparsers.add_parser(
+        "review-separation",
+        help="open the Stem Observatory for one separated specimen",
+        description=(
+            "Builds a local page in which the source mix, every model output, and the "
+            "engineering diagnostics share one transport clock, then serves it on loopback and "
+            "opens it. Runs no model, makes no request that leaves this machine, and records no "
+            "verdict: gate 3 is passed by listening."
+        ),
+    )
+    observatory_parser.add_argument("specimen_id")
+    observatory_parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="port to listen on; 0 lets the kernel choose a free one",
+    )
+    observatory_parser.add_argument(
+        "--no-open", action="store_true", help="print the URL rather than opening a browser"
+    )
+    observatory_parser.add_argument(
+        "--print-only",
+        action="store_true",
+        help="write the page and the checklist, and do not start a server",
+    )
+
     return parser
 
 
@@ -1097,6 +1250,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "separate":
         return separate_command(
             args.specimen_id, device=args.device, force=args.force, as_json=args.json
+        )
+    if args.command == "review-separation":
+        return review_separation_command(
+            args.specimen_id,
+            port=args.port,
+            open_browser=not args.no_open,
+            print_only=args.print_only,
         )
 
     raise AssertionError(f"unreachable: unhandled command {args.command!r}")
