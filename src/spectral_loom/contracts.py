@@ -20,6 +20,12 @@ Three documents matter, and they are deliberately small:
     about the file and the *request* that produced it, and never the request
     dressed up as an observation.
 
+``SeparationManifest``
+    What one separator was given, what it emitted, and under exactly which
+    identities. Its stems are named for the *model's own outputs*: ``bass``
+    means HTDemucs assigned a signal to its ``bass`` output, and never that the
+    file contains only bass or that the source contained a bass at all.
+
 ``SpecimenReview``
     What a human decided about one exact rendering after listening to it. It is
     tracked, unlike the audio it is about, so it is the only record that
@@ -62,6 +68,9 @@ GENERATION_SCHEMA_VERSION: Final = "0.1.0"
 
 REVIEW_SCHEMA_ID: Final = "spectral-loom/specimen-review"
 REVIEW_SCHEMA_VERSION: Final = "0.1.0"
+
+SEPARATION_SCHEMA_ID: Final = "spectral-loom/separation-manifest"
+SEPARATION_SCHEMA_VERSION: Final = "0.1.0"
 
 #: Slug-shaped stable identifier for a specimen. Stable across regeneration:
 #: it names the *intent*, while the audio hash names a particular rendering.
@@ -616,4 +625,226 @@ class SpecimenReview(Contract):
                 f"document's provenance says were produced ({sorted(emitted)}); a review must "
                 f"be about bytes its own record can attribute"
             )
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Separation manifest: what a separator was given and what it emitted.
+# ---------------------------------------------------------------------------
+
+
+class AudioArtifact(Contract):
+    """One audio file this project wrote, measured after writing it.
+
+    Measured *after*, not before. The numbers here describe the bytes on disk —
+    the ones a person will actually hear and a later stage will actually read —
+    rather than an in-memory tensor that was quantized on its way out.
+    """
+
+    path: str = Field(
+        min_length=1,
+        max_length=512,
+        description="Location relative to the repository root. A claim about where, not what.",
+    )
+    hash: ContentHash
+    duration_s: float = Field(gt=0)
+    sample_rate_hz: int = Field(gt=0)
+    channels: int = Field(ge=1, le=64)
+    peak: float = Field(ge=0, description="Largest absolute sample value, observed.")
+    rms: float = Field(ge=0, description="Root mean square over the whole file, observed.")
+
+
+class Stem(Contract):
+    """One output a separator produced, named the way the separator names it.
+
+    ``model_output`` is the single most misreadable field in this project, so it
+    is not called ``instrument``. ``bass`` means **HTDemucs assigned this signal
+    to its `bass` output**. It does not mean the file contains only bass, and it
+    does not mean the source contained a bass.
+
+    The same care applies hardest to ``vocals``. Content appearing there may be
+    voice-like source material, model confusion, or leakage from another
+    instrument, and a stem that is near-silent is a failure to assign rather than
+    proof that nobody sang.
+    """
+
+    model_output: Slug = Field(
+        description="The separator's own name for this output. Not a verified instrument."
+    )
+    audio: AudioArtifact
+    clipped_samples: int = Field(
+        ge=0,
+        description=(
+            "Samples whose magnitude exceeded full scale and were clamped on write. Recorded "
+            "rather than rescaled away: a silent gain change would corrupt every later "
+            "comparison against the source."
+        ),
+    )
+    non_finite_samples: int = Field(
+        ge=0,
+        description="Samples the model emitted that were not finite. Nonzero is a real problem.",
+    )
+
+
+class Diagnostic(Contract):
+    """An engineering check, deliberately not an inferred stem.
+
+    A reconstructed mix and a residual are arithmetic performed on the outputs.
+    They carry no model opinion, they are not evidence about the music, and
+    nothing downstream may treat one as a track. They exist so that a person can
+    hear what separation lost, and so that a number for it is on the record
+    rather than in somebody's memory.
+    """
+
+    id: Slug
+    description: str = Field(
+        min_length=1, max_length=500, description="What this diagnostic is, in one sentence."
+    )
+    audio: AudioArtifact | None = Field(
+        default=None, description="The rendered diagnostic, where one was written."
+    )
+    measurements: Extension = Field(
+        default_factory=dict, description="Observed numbers. No thresholds, no verdicts."
+    )
+
+
+class Separator(Contract):
+    """Exactly which implementation, loading exactly which weights.
+
+    Both halves, because upstream versions them separately: a distribution
+    identity alone would not say which bytes were loaded, and a weights revision
+    alone would not say which code interpreted them.
+    """
+
+    adapter: str = Field(min_length=1, max_length=64, description="This project's adapter name.")
+
+    code_distribution: str = Field(min_length=1, max_length=100)
+    code_version: str = Field(min_length=1, max_length=50)
+    code_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$",
+        description="Digest the package index published for the exact artifact installed.",
+    )
+    loaded_with: str = Field(
+        min_length=1,
+        max_length=200,
+        description="Symbol that read the weights off disk, e.g. demucs.hf.load_safetensors_model.",
+    )
+    applied_with: str = Field(
+        min_length=1,
+        max_length=200,
+        description="Symbol that performed the separation, e.g. demucs.apply.apply_model.",
+    )
+
+    weights_repo: str = Field(min_length=1, max_length=200)
+    weights_revision: str = Field(
+        pattern=r"^[0-9a-f]{40}$",
+        description="Immutable upstream revision. Never a branch and never a tag.",
+    )
+    weights_variant: str = Field(min_length=1, max_length=100)
+    model_signatures: list[str] = Field(
+        min_length=1,
+        description=(
+            "Signatures of the models in the bag, as upstream names them. `htdemucs` is a bag "
+            "of exactly one model and its signature is part of what produced any stem."
+        ),
+    )
+
+    model_sample_rate_hz: int = Field(
+        gt=0, description="The rate the loaded model works at, read off the model."
+    )
+    model_audio_channels: int = Field(ge=1, le=64)
+    sources: list[str] = Field(
+        min_length=1,
+        description="The model's own output names, in the order the model emits them.",
+    )
+
+
+class SeparationManifest(Contract):
+    """The record that makes one separation auditable and reusable.
+
+    Two jobs, and `docs/provenance.md` says they are the same information: it
+    attributes the stems, and it *is* the cache key. Reuse is a comparison of
+    this document against a freshly computed key, followed by re-hashing every
+    file it claims to describe — because a manifest describing files that have
+    since changed is not a cache entry, it is a document making a false claim.
+
+    The truth layers stay apart. Hashes, durations, sample rates, channel counts,
+    peaks and residuals are ``observed``: anyone holding the files can recompute
+    them. The producing stage is ``inferred``: HTDemucs at an exact revision had
+    an opinion about which signal belonged to which of its outputs.
+
+    **No human quality judgement belongs in here.** Whether the bass is actually
+    isolated is gate 3, it is answered by ears, and it is recorded in a
+    `SpecimenReview`, not in the output of the thing being judged.
+    """
+
+    schema_id: Literal["spectral-loom/separation-manifest"] = SEPARATION_SCHEMA_ID
+    schema_version: Literal["0.1.0"] = SEPARATION_SCHEMA_VERSION
+
+    specimen_id: SpecimenId
+    source_audio: SourceAudio = Field(
+        description="The exact bytes that were separated. Observed, and verified before the run."
+    )
+    source_path: str = Field(min_length=1, max_length=512)
+
+    review_hash: ContentHash = Field(
+        description=(
+            "Hash of the specimen review that accepted these bytes. Separation does not run on "
+            "audio no human has accepted, and this is the receipt for that precondition."
+        )
+    )
+    generation_manifest_hash: ContentHash = Field(
+        description="Hash of the generation manifest that attributes the separated bytes."
+    )
+
+    separator: Separator
+    stems: list[Stem] = Field(min_length=1)
+    diagnostics: list[Diagnostic] = Field(default_factory=list)
+
+    cache_key: ContentHash = Field(
+        description="Digest over `cache_key_inputs`. A run whose key differs is a different run."
+    )
+    cache_key_inputs: Extension = Field(
+        description=(
+            "Everything the key was computed from, so that a stale entry can be diagnosed "
+            "rather than merely disbelieved."
+        )
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="What the run emitted or had to do, including any explicit fallback.",
+    )
+
+    provenance: list[Provenance] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check_outputs(self) -> SeparationManifest:
+        stages = [p.stage for p in self.provenance]
+        duplicate = {s for s in stages if stages.count(s) > 1}
+        if duplicate:
+            raise ValueError(f"duplicate provenance stage names: {sorted(duplicate)}")
+
+        names = [s.model_output for s in self.stems]
+        repeated = {n for n in names if names.count(n) > 1}
+        if repeated:
+            raise ValueError(f"duplicate stem outputs: {sorted(repeated)}")
+
+        unknown = set(names) - set(self.separator.sources)
+        if unknown:
+            raise ValueError(
+                f"stems {sorted(unknown)} are not among the separator's own outputs "
+                f"{self.separator.sources}; a stem must be named by the model that made it"
+            )
+
+        ids = [d.id for d in self.diagnostics]
+        repeated_ids = {i for i in ids if ids.count(i) > 1}
+        if repeated_ids:
+            raise ValueError(f"duplicate diagnostic ids: {sorted(repeated_ids)}")
+
+        paths = [s.audio.path for s in self.stems] + [
+            d.audio.path for d in self.diagnostics if d.audio is not None
+        ]
+        collisions = {p for p in paths if paths.count(p) > 1}
+        if collisions:
+            raise ValueError(f"two artifacts claim the same path: {sorted(collisions)}")
         return self

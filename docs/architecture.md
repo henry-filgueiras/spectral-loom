@@ -12,9 +12,10 @@ music generator
     → visual projections  (4) back ends
 ```
 
-The first arrow is implemented: a `SongSpec` becomes generated audio and a manifest that makes it
-attributable. Nothing after it exists — no separation, no timeline, no projection. This document
-describes the shape the rest must take and the invariants none of it may violate.
+The first two arrows are implemented: a `SongSpec` becomes generated audio with a manifest that
+makes it attributable, and audio a human has accepted becomes separated stems with a manifest of
+their own. Nothing after that exists — no timeline, no projection. This document describes the
+shape the rest must take and the invariants none of it may violate.
 
 ## The four layers
 
@@ -53,6 +54,26 @@ prompt edit away from silently running on bytes nobody has heard. A human's judg
 artifact's fitness is **not** one of the four truth layers below — those classify claims about a
 recording, and "these bytes are a usable specimen" is a claim about the project. See
 `archaeology/decisions/0010`.
+
+### 2b. Separated stems
+
+Separation is the first stage whose output another stage reads as evidence, and the first whose
+output is a model's opinion rather than a measurement. Both facts shape how it is recorded.
+
+A stem is named by **the model that made it**. `bass.wav` means HTDemucs assigned a signal to its
+`bass` output. It is not a claim that the file contains only bass, and it is emphatically not a
+claim that the source contained a bass — the contract calls the field `model_output` so that this
+is visible at the point of use. The same care applies hardest to `vocals`: content there may be
+voice-like source material, model confusion, or leakage, and a near-silent stem is a failure to
+assign rather than evidence that nobody sang.
+
+A `SeparationManifest` carries the observations (hashes, durations, rates, channel counts, peaks),
+the inference (which code at which version loaded which weights at which revision, on which
+backend, with which parameters), and the cache key those two together define. Reconstructed mixes
+and residuals are **engineering diagnostics**, recorded in their own field and explicitly not
+stems: they are arithmetic on the outputs and carry no model opinion.
+
+Stems are untracked and regenerable from accepted bytes plus a pinned revision.
 
 ### 3. Inferred semantic timeline
 

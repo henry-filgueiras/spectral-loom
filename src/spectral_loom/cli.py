@@ -7,8 +7,10 @@ Four commands. Three of them inspect and validate; one of them runs a model::
     spectral-loom validate-timeline PATH [--json]
     spectral-loom generate PATH [--json] [--force]
     spectral-loom accept SPECIMEN --reviewer NAME --reviewed-on DATE ...
+    spectral-loom separate SPECIMEN [--device mps|cpu] [--json] [--force]
 
-``generate`` is expensive and needs the cabinet environment. It never downloads:
+``generate`` and ``separate`` are expensive and need the cabinet environment.
+Neither downloads:
 weights are a precondition a human establishes with
 ``scripts/bootstrap_cabinet.py``, and generation that quietly fetches eleven
 gigabytes is not a pipeline stage, it is a surprise.
@@ -67,6 +69,7 @@ from spectral_loom.cabinet import (
 from spectral_loom.contracts import (
     CriterionResponse,
     GenerationManifest,
+    SeparationManifest,
     SongSpec,
     SongTimeline,
 )
@@ -87,6 +90,9 @@ from spectral_loom.review import (
     review_path,
     write_review,
 )
+from spectral_loom.separate import SeparationError
+from spectral_loom.separate import plan as plan_separation
+from spectral_loom.separate import run as run_separation
 
 EXIT_OK = 0
 EXIT_BLOCKED = 1
@@ -796,6 +802,113 @@ def accept_command(
 
 
 # ---------------------------------------------------------------------------
+# separate
+# ---------------------------------------------------------------------------
+
+
+def separate_command(
+    specimen_id: str,
+    *,
+    device: str | None,
+    force: bool,
+    as_json: bool,
+    root: Path | None = None,
+) -> int:
+    """Separate one accepted specimen, and stop.
+
+    Stopping is the feature again. Gate 3 of `docs/roadmap.md` is passed by a
+    human hearing the stems, so this writes them, measures them, says how to
+    listen, and forms no opinion about whether the separation is any good.
+    """
+    repo = find_repository_root(root or Path.cwd())
+    try:
+        cabinet = load_repository_cabinet(repo)
+        prepared = plan_separation(specimen_id, cabinet, repo, device=device)
+    except (CabinetError, SeparationError) as exc:
+        return _report_failure(as_json, EXIT_BLOCKED, specimen_id, [str(exc)])
+
+    if not as_json:
+        print(f"{specimen_id}")
+        print(f"  source      {prepared.source_path}")
+        print(f"  sha256      {prepared.source_hash}")
+        print(f"  accepted    {prepared.review_path.name}")
+        print(f"  separator   {prepared.tool}")
+        print(f"  revision    {prepared.tool_revision}")
+        print(f"  device      {prepared.device} (requested; refuses rather than falling back)")
+        print(f"  output      {prepared.output_dir}")
+        print(f"  cache key   {prepared.cache_key}")
+        print()
+
+    try:
+        manifest, produced = run_separation(prepared, force=force)
+    except SeparationError as exc:
+        return _report_failure(as_json, EXIT_BLOCKED, specimen_id, [str(exc)])
+
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "specimen_id": specimen_id,
+                    "separated": produced,
+                    "cache_hit": not produced,
+                    "manifest": str(prepared.manifest_path),
+                    "manifest_document": manifest.model_dump(mode="json"),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return EXIT_OK
+
+    _print_separation(manifest, produced=produced, specimen_id=specimen_id)
+    return EXIT_OK
+
+
+def _print_separation(manifest: SeparationManifest, *, produced: bool, specimen_id: str) -> None:
+    """Report the artifacts and the diagnostics, and nothing about quality.
+
+    Every stem is printed under the name the model gave it, prefixed with the
+    model, because `bass.wav` on a line by itself reads like a verified fact and
+    `HTDemucs - bass` reads like what it is: an assignment made by a program.
+    """
+    stage = manifest.provenance[0]
+    if produced:
+        print("separated")
+    else:
+        print("cache hit: reused a previous separation, after re-hashing every file it declares")
+    if stage.duration_ms is not None:
+        label = "took" if produced else "recorded"
+        print(f"  {label:<11} {stage.duration_ms / 1000:.1f} s")
+    print(f"  runtime     {stage.runtime}")
+    print()
+    print("  model outputs — these are the separator's own labels, not verified instruments:")
+    for stem in manifest.stems:
+        audio = stem.audio
+        print(
+            f"    {manifest.separator.weights_variant} - {stem.model_output:<7} "
+            f"{audio.duration_s:6.2f} s  {audio.sample_rate_hz} Hz  {audio.channels} ch  "
+            f"peak {audio.peak:.3f}  rms {audio.rms:.4f}"
+        )
+        print(f"      {audio.path}")
+        print(f"      {audio.hash}")
+    print()
+    for diagnostic in manifest.diagnostics:
+        print(f"  diagnostic: {diagnostic.id}")
+        for key, value in sorted(diagnostic.measurements.items()):
+            if key == "note":
+                continue
+            print(f"    {key}: {value}")
+    if manifest.warnings:
+        print()
+        print("  warnings:")
+        for warning in manifest.warnings:
+            print(f"    {warning}")
+    print()
+    print("Nothing has been inferred from these stems, and nothing here says they are good.")
+    print(f"Hear them together:  spectral-loom review-separation {specimen_id}")
+
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -904,6 +1017,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     accept_parser.add_argument("--json", action="store_true", help="machine-readable output")
 
+    separate_parser = subparsers.add_parser(
+        "separate",
+        help="separate one accepted specimen with the pinned Demucs snapshot",
+        description=(
+            "Runs the pinned separator once over bytes a human accepted, and writes the stems "
+            "with a manifest that attributes them. Needs the cabinet environment and the "
+            "weights already on disk; it never downloads, and it never resolves a moving "
+            "upstream revision. An unchanged request against an unchanged revision reuses the "
+            "previous result only after re-hashing every file that result claims to describe."
+        ),
+    )
+    separate_parser.add_argument("specimen_id", help="specimen id, e.g. sparse-funk-exposed-bass")
+    separate_parser.add_argument(
+        "--device",
+        choices=["mps", "cpu", "cuda"],
+        default=None,
+        help=(
+            "backend to run on; defaults to the accelerator model-cabinet.toml records. "
+            "There is no fall back: an unavailable backend is a refusal, and choosing cpu is "
+            "deliberate and reaches the provenance, the cache key and the report."
+        ),
+    )
+    separate_parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "separate again even when a verified result exists, moving anything already there "
+            "aside rather than deleting it"
+        ),
+    )
+    separate_parser.add_argument("--json", action="store_true", help="machine-readable output")
+
     return parser
 
 
@@ -947,6 +1092,11 @@ def main(argv: list[str] | None = None) -> int:
             accepted=not args.reject,
             force=args.force,
             as_json=args.json,
+        )
+
+    if args.command == "separate":
+        return separate_command(
+            args.specimen_id, device=args.device, force=args.force, as_json=args.json
         )
 
     raise AssertionError(f"unreachable: unhandled command {args.command!r}")

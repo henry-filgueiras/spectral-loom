@@ -104,9 +104,14 @@ def test_bare_invocation_is_help_not_an_error() -> None:
 
 
 def test_an_unknown_command_names_itself_and_fails() -> None:
-    result = run("separate")
+    """`separate` used to be the example here, and then it was implemented.
+
+    The replacement is a verb this project has decided it will not have: the
+    projections are gates 6 and 7 and they are not a `loom` command yet.
+    """
+    result = run("render")
     assert result.returncode != 0
-    assert "unknown command: separate" in result.stderr
+    assert "unknown command: render" in result.stderr
     assert "doctor" in result.stderr, "say what does exist"
 
 

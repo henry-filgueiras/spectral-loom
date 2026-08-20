@@ -34,7 +34,7 @@
 set -eu
 
 # The one line tests/test_loom.py parses. Keep it a flat, single-line list.
-LOOM_COMMANDS="doctor validate-spec validate-timeline generate accept bootstrap smoke check help"
+LOOM_COMMANDS="doctor validate-spec validate-timeline generate accept separate bootstrap smoke check help"
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CABINET="$ROOT/.venv-cabinet"
@@ -71,6 +71,7 @@ loom — one entry point for Spectral Loom.
   ./loom validate-timeline PATH         check a timeline
   ./loom generate PATH [--json]         generate one specimen  [needs the cabinet]
   ./loom accept SPECIMEN ...            record a human's verdict on one specimen
+  ./loom separate SPECIMEN [--json]     separate an accepted specimen  [needs the cabinet]
   ./loom bootstrap env                  build the cabinet environment
   ./loom bootstrap assets [--offline]   fetch the pinned weights  [needs the cabinet]
   ./loom bootstrap status [--verify]    report what is on disk; changes nothing
@@ -115,9 +116,9 @@ case "$command" in
         exec uv run --project "$ROOT" spectral-loom "$command" "$@"
         ;;
 
-    generate)
+    generate | separate)
         need_cabinet
-        exec "$CABINET/bin/spectral-loom" generate "$@"
+        exec "$CABINET/bin/spectral-loom" "$command" "$@"
         ;;
 
     bootstrap)

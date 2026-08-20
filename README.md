@@ -91,6 +91,7 @@ published before the hub client is even imported. See [scripts/README.md](script
 
 ./loom generate corpus/specs/example.yaml
 ./loom accept sparse-funk-exposed-bass --reviewer Henry --reviewed-on 2026-08-20 ...
+./loom separate sparse-funk-exposed-bass
 ```
 
 `generate` is the only expensive command and the only one that needs the cabinet environment. It
@@ -98,6 +99,21 @@ never downloads; weights are a precondition the bootstrap establishes. It refuse
 specification whose generator revision is null or disagrees with the cabinet, and an unchanged
 request against an unchanged revision reuses the existing specimen rather than burning another
 inference run.
+
+`separate` runs the pinned HTDemucs snapshot over bytes a human accepted, and refuses everything
+else. It hashes the source before loading a weight and requires a review of *that hash*; it loads
+the snapshot from disk rather than through `demucs.pretrained.get_model`, which resolves whatever
+`main` points at today; it downloads nothing; and it does not fall back between backends, because
+the same weights on MPS and on CPU are not the same result — an unavailable backend is a refusal
+and `--device cpu` is a deliberate choice that reaches the provenance, the cache key and the
+report. Outputs land under `corpus/derived/<specimen>/separation/`, ignored, with a manifest that
+attributes them. A second identical run is a cache hit only after every file that manifest declares
+has been re-hashed, and an unexpected directory where the output goes stops the run rather than
+being overwritten.
+
+The stems are named `bass`, `drums`, `other`, `vocals` because **those are HTDemucs' own output
+names**, not because anything verified what is in them. A near-silent `vocals.wav` is a failure to
+assign, never proof that nobody sang.
 
 `accept` records what a person decided after listening. It runs no model and reads no audio beyond
 hashing it, and the hash is the point: a specimen id names an *intent* and survives regeneration,
