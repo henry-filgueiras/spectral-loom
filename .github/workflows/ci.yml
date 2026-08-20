@@ -1,7 +1,8 @@
 name: ci
 
 # Verification only. Nothing here downloads a model, generates audio, or
-# publishes anything, and nothing here pushes to this repository.
+# publishes anything, and nothing here pushes to this repository. The no-model
+# half of that is enforced rather than asserted: see archaeology/decisions/0007.
 on:
   push:
     branches: [main]
@@ -46,8 +47,19 @@ jobs:
       - name: Schema drift
         run: uv run python -m spectral_loom.schemas
 
+      # The unit suite is hermetic: it downloads nothing and needs no model
+      # weights. `tests/netguard.py` enforces that from inside the process; these
+      # variables make an accidental hub call fail loudly at the client instead
+      # of quietly pulling gigabytes into the runner. Tests marked `needs_model`
+      # or `needs_network` are deselected by the default pytest options and have
+      # no CI step. See archaeology/decisions/0007.
       - name: Tests
         run: uv run pytest
+        env:
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+          HF_DATASETS_OFFLINE: "1"
+          HF_HUB_DISABLE_TELEMETRY: "1"
 
       - name: Example corpus specification validates
         run: uv run spectral-loom validate-spec corpus/specs/example.yaml

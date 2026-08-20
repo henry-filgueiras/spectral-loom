@@ -3,6 +3,10 @@
 No audio fixture is committed. Where a test needs audio-like input it synthesizes
 a minimal WAV into pytest's `tmp_path`, which the test framework removes; see
 `docs/architecture.md` on why generated audio never enters the tree.
+
+The suite is hermetic. `tests/netguard.py` is re-exported here so its autouse
+fixture applies to every test: nothing under `tests/` may open a connection that
+leaves the machine, and nothing may need model weights on disk.
 """
 
 from __future__ import annotations
@@ -16,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from tests.netguard import _block_network  # noqa: F401  (autouse fixture)
 
 
 @pytest.fixture

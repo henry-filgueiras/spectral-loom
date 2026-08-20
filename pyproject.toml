@@ -60,4 +60,13 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+# The default selection is the hermetic unit suite: no network, no model
+# weights, no CI step that has to download anything. Both escape markers are
+# deselected here rather than merely documented, so `uv run pytest` means the
+# same thing on a laptop, in CI, and on a machine with an empty model cabinet.
+# See archaeology/decisions/0007.
+addopts = "-ra --strict-markers -m 'not needs_model and not needs_network'"
+markers = [
+    "needs_model: requires model weights on disk; never runs in CI",
+    "needs_network: must reach the network; lifts the tests/netguard.py block",
+]

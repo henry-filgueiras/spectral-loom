@@ -36,6 +36,9 @@ Every script in this directory must:
    recorded in `archaeology/decisions/`.
 6. **Write into ignored locations only** — `models/`, `.cache/`, `.work/` — and never into a
    tracked path.
+7. **Be invoked by a human, never by a test or by CI.** The test suite is hermetic and downloads
+   nothing; weights are a precondition a script here establishes deliberately, and a test that
+   depends on them is marked `needs_model`. See `../archaeology/decisions/0007-keep-the-test-suite-hermetic-no-network-no-model-weights.md`.
 
 ## Why they do not exist yet
 

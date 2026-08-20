@@ -69,6 +69,13 @@ If a test needs audio-like input, synthesize a minimal WAV into pytest's `tmp_pa
 test framework delete it. There is a `tone_wav` fixture in `tests/conftest.py`. Do not add an
 audio fixture to the tree.
 
+The test suite is hermetic: it opens no network connection and needs no model weights.
+`tests/netguard.py` enforces the first with an autouse fixture, and CI never selects the escape
+markers. A test that needs weights is marked `needs_model`; a test that must reach out is marked
+`needs_network`. Both are deselected by default, and neither runs in CI. Weights are a
+precondition obtained by a bootstrap script, never something a test downloads. See
+`archaeology/decisions/0007`.
+
 Model assets are fetched only by scripts that pin exact revisions, verify before downloading, are
 idempotent, record licenses, and do not execute remote code. See `scripts/README.md`.
 
