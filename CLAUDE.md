@@ -95,12 +95,22 @@ idempotent, record licenses, and do not execute remote code. See `scripts/README
 
 ## Commands
 
+`./loom` is the entry point. It routes each command to the environment that command needs —
+`.venv` for the light ones, `.venv-cabinet` for anything that touches a model — and forwards
+arguments untouched. **It routes; it never implements.** Behaviour that exists only in the wrapper
+is a bug in the wrapper. `tests/test_loom.py` asserts that every `spectral-loom` subcommand is
+reachable from it, so a new CLI command cannot be added and forgotten here.
+
 ```sh
 uv sync                                        # environment, from the committed lockfile
-uv run spectral-loom doctor                    # local prerequisites; changes nothing
-uv run pytest                                  # tests
-uv run ruff format . && uv run ruff check .    # format and lint
-uv run mypy                                    # types, strict
-uv run python -m spectral_loom.schemas         # schema drift check
+./loom help                                    # everything below, with its environment
+./loom doctor                                  # prerequisites and cabinet state; changes nothing
+./loom check                                   # format, lint, types, tests, schema drift
+./loom bootstrap env|assets|status             # establish the model cabinet; human-invoked
+./loom smoke                                   # run each pinned model once
+./loom generate corpus/specs/example.yaml      # one specimen; needs the cabinet
 scarp doctor                                   # archaeology invariants
 ```
+
+Anything without a wrapper is run directly and deliberately, e.g. `uv run pytest -k cabinet`. Do
+not add a wrapper verb for every task; `./loom` covers this project's own surface, not `uv`'s.

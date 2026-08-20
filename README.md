@@ -44,6 +44,16 @@ uv sync
 That installs eighteen packages and no model. The cabinet is optional and lives in its own
 environment; nothing below needs it except `generate`.
 
+`./loom` is the entry point. There are two environments in this project and which one a command
+needs is a fact about the command, so the router knows it and you do not:
+
+```sh
+./loom help
+```
+
+Everything below can also be run directly — `./loom` forwards arguments untouched and `exec`s, so
+the exit code is the underlying command's. The direct form is shown where it is useful to know.
+
 ## The model cabinet
 
 [model-cabinet.toml](model-cabinet.toml) is the tracked record of what this project means by
@@ -58,9 +68,9 @@ its own wheel, so its distribution digest is the whole identity.
 Stocking it is deliberate, human-invoked, and downloads about 11.2 GB:
 
 ```sh
-uv run scripts/bootstrap_cabinet.py env                            # the pinned environment
-.venv-cabinet/bin/python scripts/bootstrap_cabinet.py assets       # the pinned weights
-.venv-cabinet/bin/python scripts/smoke_cabinet.py                  # run each one once
+./loom bootstrap env       # the pinned environment, from the committed lockfile
+./loom bootstrap assets    # the pinned weights
+./loom smoke               # run each one once
 ```
 
 Re-running `assets` downloads nothing: every pinned file is checked against the sha256 upstream
@@ -69,13 +79,13 @@ published before the hub client is even imported. See [scripts/README.md](script
 ## CLI
 
 ```sh
-uv run spectral-loom doctor                      # local prerequisites and cabinet state
-uv run spectral-loom doctor --json               # same, machine-readable
-uv run spectral-loom doctor --verify             # hash every pinned model file; still no download
-uv run spectral-loom validate-spec corpus/specs/example.yaml
-uv run spectral-loom validate-timeline path/to/song.timeline.json
+./loom doctor                      # local prerequisites and cabinet state
+./loom doctor --json               # same, machine-readable
+./loom doctor --verify             # hash every pinned model file; still no download
+./loom validate-spec corpus/specs/example.yaml
+./loom validate-timeline path/to/song.timeline.json
 
-.venv-cabinet/bin/spectral-loom generate corpus/specs/example.yaml
+./loom generate corpus/specs/example.yaml
 ```
 
 `generate` is the only expensive command and the only one that needs the cabinet environment. It
@@ -94,6 +104,12 @@ Exit codes are part of the interface: `0` ok, `1` blocked, `2` invalid document,
 input.
 
 ## Tests, lint, and types
+
+```sh
+./loom check
+```
+
+which is exactly this, in this order, stopping at the first failure:
 
 ```sh
 uv run ruff format --check .

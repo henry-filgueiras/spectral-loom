@@ -15,6 +15,11 @@ Anything that belongs in the package. The CLI lives in `src/spectral_loom/cli.py
 for anything a user runs as part of the pipeline. A script here is machine setup, not a pipeline
 stage.
 
+Also not here: `../loom`, the router that gives both halves one entry point. It sits at the
+repository root because a wrapper you have to type a directory name to reach has not saved anyone
+anything, and because it is neither machine setup nor a pipeline stage — it knows which environment
+each command needs and nothing else.
+
 ## The contract for a model bootstrap script
 
 Every script in this directory must:

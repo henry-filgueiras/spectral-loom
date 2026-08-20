@@ -1,0 +1,157 @@
+#!/bin/sh
+# One entry point, so that knowing which environment a command needs is this
+# file's job rather than yours.
+#
+#   ./loom doctor
+#   ./loom generate corpus/specs/example.yaml
+#   ./loom check
+#
+# There are two environments in this project and they are not interchangeable.
+# `.venv` is light and fast and has no torch in it; `.venv-cabinet` carries the
+# model cabinet and is several gigabytes. Which one a given command needs is a
+# fact about the command, and it belongs here — encoded once — instead of in the
+# muscle memory of whoever is typing.
+#
+# THIS FILE ROUTES. IT DOES NOT IMPLEMENT.
+#
+# That is the rule that keeps it from becoming a second, worse CLI. Arguments are
+# forwarded verbatim, the real program is `exec`ed so its exit code is the exit
+# code, and nothing here interprets a flag on the way past. `spectral-loom`'s
+# exit codes are part of its interface (0 ok, 1 blocked, 2 invalid document,
+# 3 unreadable input) and a wrapper that swallowed one would be breaking that
+# interface from the outside. Adding behaviour here that is not in the thing
+# being routed to means the two have diverged, and the documented one is right.
+#
+# It also refuses rather than fixes. A missing cabinet environment prints the
+# command that builds it; it does not quietly start a multi-gigabyte download
+# because you asked for something else. Preconditions in this project are
+# established deliberately by a human.
+#
+# `loom help` lists everything. `tests/test_loom.py` asserts that every
+# `spectral-loom` subcommand is reachable from here, so a new command cannot be
+# added to the CLI and forgotten in the router.
+
+set -eu
+
+# The one line tests/test_loom.py parses. Keep it a flat, single-line list.
+LOOM_COMMANDS="doctor validate-spec validate-timeline generate bootstrap smoke check help"
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+CABINET="$ROOT/.venv-cabinet"
+
+die() {
+    printf '%s\n' "$*" >&2
+    exit 1
+}
+
+# `uv` owns the default environment: it resolves from the committed lockfile and
+# creates `.venv` on first use, so there is no "activate it first" step.
+need_uv() {
+    command -v uv >/dev/null 2>&1 ||
+        die "uv is not on PATH. It owns this project's environment and lockfile: https://docs.astral.sh/uv/"
+}
+
+# The cabinet environment is NOT created here. It is 11 GB of torch and it is
+# built when a human decides to build it.
+need_cabinet() {
+    [ -x "$CABINET/bin/python" ] || die "the model cabinet environment is not built.
+
+  ./loom bootstrap env       builds it from the committed lockfile
+  ./loom bootstrap assets    then fetches the pinned weights (about 11.2 GB)
+
+See scripts/README.md, or ./loom doctor for what is currently present."
+}
+
+usage() {
+    cat <<'EOF'
+loom — one entry point for Spectral Loom.
+
+  ./loom doctor [--json] [--verify]     local prerequisites and cabinet state
+  ./loom validate-spec PATH [--json]    check a song specification
+  ./loom validate-timeline PATH         check a timeline
+  ./loom generate PATH [--json]         generate one specimen  [needs the cabinet]
+  ./loom bootstrap env                  build the cabinet environment
+  ./loom bootstrap assets [--offline]   fetch the pinned weights  [needs the cabinet]
+  ./loom bootstrap status [--verify]    report what is on disk; changes nothing
+  ./loom smoke [entry ...] [--json]     run each pinned model once  [needs the cabinet]
+  ./loom check                          format, lint, types, tests, schema drift
+  ./loom help                           this
+
+Commands marked [needs the cabinet] run from .venv-cabinet; everything else runs
+from the default environment. Arguments are passed through untouched, and the
+exit code is whatever the underlying command returned.
+
+Anything not listed here has no wrapper on purpose — run it directly, e.g.
+`uv run pytest -k cabinet`. This file routes; it does not reimplement.
+EOF
+}
+
+# `check` is the only composite, because "did I break anything" is the one
+# question worth a single word. It is exactly the suite CLAUDE.md documents, in
+# the same order, and it stops at the first failure.
+run_check() {
+    need_uv
+    printf '\n== format ==\n';       uv run --project "$ROOT" ruff format --check "$ROOT"
+    printf '\n== lint ==\n';         uv run --project "$ROOT" ruff check "$ROOT"
+    printf '\n== types ==\n';        uv run --project "$ROOT" mypy
+    printf '\n== tests ==\n';        uv run --project "$ROOT" pytest
+    printf '\n== schema drift ==\n'; uv run --project "$ROOT" python -m spectral_loom.schemas
+    printf '\nall checks passed\n'
+}
+
+[ $# -gt 0 ] || { usage; exit 0; }
+
+command=$1
+shift
+
+case "$command" in
+    help | --help | -h)
+        usage
+        ;;
+
+    doctor | validate-spec | validate-timeline)
+        need_uv
+        exec uv run --project "$ROOT" spectral-loom "$command" "$@"
+        ;;
+
+    generate)
+        need_cabinet
+        exec "$CABINET/bin/spectral-loom" generate "$@"
+        ;;
+
+    bootstrap)
+        [ $# -gt 0 ] || die "./loom bootstrap needs a subcommand: env, assets, or status"
+        subcommand=$1
+        shift
+        case "$subcommand" in
+            # Fetching needs huggingface_hub, which only the cabinet has.
+            assets)
+                need_cabinet
+                exec "$CABINET/bin/python" "$ROOT/scripts/bootstrap_cabinet.py" assets "$@"
+                ;;
+            env | status)
+                need_uv
+                exec uv run --project "$ROOT" python "$ROOT/scripts/bootstrap_cabinet.py" \
+                    "$subcommand" "$@"
+                ;;
+            *)
+                die "unknown bootstrap subcommand '$subcommand'; expected env, assets, or status"
+                ;;
+        esac
+        ;;
+
+    smoke)
+        need_cabinet
+        exec "$CABINET/bin/python" "$ROOT/scripts/smoke_cabinet.py" "$@"
+        ;;
+
+    check)
+        run_check
+        ;;
+
+    *)
+        printf 'unknown command: %s\n\n' "$command" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
