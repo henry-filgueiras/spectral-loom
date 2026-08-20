@@ -1,0 +1,180 @@
+{
+  "$defs": {
+    "GeneratorRef": {
+      "additionalProperties": false,
+      "description": "Which generator was asked, and at exactly which revision.",
+      "properties": {
+        "adapter": {
+          "description": "Adapter name within this project, e.g. 'ace-step'. Not a package name.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Adapter",
+          "type": "string"
+        },
+        "model_id": {
+          "description": "Upstream model identity, e.g. a Hugging Face repository id.",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact upstream revision: a commit sha, never a moving branch or tag. Null means the revision is not pinned yet, and a null revision must block generation rather than resolve to whatever is current today.",
+          "title": "Revision"
+        }
+      },
+      "required": [
+        "adapter",
+        "model_id"
+      ],
+      "title": "GeneratorRef",
+      "type": "object"
+    },
+    "JsonValue": {}
+  },
+  "$id": "https://spectral-loom.invalid/schemas/spectral-loom/song-spec/0.1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A request for a specimen. Nothing here is an observation about audio.",
+  "properties": {
+    "generator": {
+      "$ref": "#/$defs/GeneratorRef"
+    },
+    "generator_params": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "description": "Generator-specific parameters, contained here rather than in the envelope.",
+      "title": "Generator Params",
+      "type": "object"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "requested_bpm": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "maximum": 400,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Requested Bpm"
+    },
+    "requested_duration_s": {
+      "description": "Requested duration in seconds. The rendered audio may differ.",
+      "exclusiveMinimum": 0,
+      "maximum": 3600,
+      "title": "Requested Duration S",
+      "type": "number"
+    },
+    "requested_instruments": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Instruments the prompt asks for. Their presence in the result is an open question that only analysis of the audio can answer.",
+      "title": "Requested Instruments"
+    },
+    "requested_key": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Requested key or scale as free text, e.g. 'D minor'. Deliberately unmodelled: there is no key ontology in this project yet, and inventing one here would outrun the evidence.",
+      "title": "Requested Key"
+    },
+    "requested_prompt": {
+      "description": "Natural-language request. A request, not a description of the result.",
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Requested Prompt",
+      "type": "string"
+    },
+    "requested_time_signature": {
+      "anyOf": [
+        {
+          "pattern": "^[1-9][0-9]?/[1-9][0-9]?$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Requested Time Signature"
+    },
+    "schema_id": {
+      "const": "spectral-loom/song-spec",
+      "default": "spectral-loom/song-spec",
+      "title": "Schema Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "0.1.0",
+      "default": "0.1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "seed": {
+      "description": "Generator seed. Part of reproducibility, not of musical truth.",
+      "minimum": 0,
+      "title": "Seed",
+      "type": "integer"
+    },
+    "specimen_id": {
+      "description": "Stable identifier for this specimen, independent of any rendering of it.",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$",
+      "title": "Specimen Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "specimen_id",
+    "generator",
+    "requested_prompt",
+    "seed",
+    "requested_duration_s"
+  ],
+  "title": "SongSpec",
+  "type": "object"
+}

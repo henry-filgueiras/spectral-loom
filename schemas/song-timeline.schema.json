@@ -1,0 +1,378 @@
+{
+  "$defs": {
+    "Event": {
+      "additionalProperties": false,
+      "description": "A generic timed observation.\n\nThe vocabulary is open: ``type`` is a namespaced string rather than an enum,\nso a new kind of observation is a new namespace and not a schema change.\nAnything specific to a kind lives in ``payload`` under that same namespace.",
+      "properties": {
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Producer's confidence, where the producer reports one. Absence of an event is never evidence of absence in the audio; see docs/architecture.md.",
+          "title": "Confidence"
+        },
+        "end_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "End time; absent for instants.",
+          "title": "End S"
+        },
+        "evidence": {
+          "$ref": "#/$defs/Evidence"
+        },
+        "payload": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "Type-specific data, keyed within the event type's own namespace.",
+          "title": "Payload",
+          "type": "object"
+        },
+        "start_s": {
+          "description": "Start time in the timeline's time unit.",
+          "minimum": 0,
+          "title": "Start S",
+          "type": "number"
+        },
+        "type": {
+          "description": "Namespaced event type, e.g. 'activity.sample', 'activity.interval', 'onset'.",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9_]+)*$",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "start_s",
+        "evidence"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "description": "What an event is grounded in.\n\nThe event's own ``start_s``/``end_s`` are the source interval; this names the\nartifact that interval belongs to and the stage that read it. An event with\nno traceable evidence is an assertion, and this contract has no room for one.",
+      "properties": {
+        "artifact": {
+          "description": "Artifact this observation came from, e.g. 'source' or 'stems/bass.wav'.",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Artifact",
+          "type": "string"
+        },
+        "artifact_hash": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Hash"
+        },
+        "stage": {
+          "description": "Name of the producing stage in this timeline's provenance.",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9_]+)*$",
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact",
+        "stage"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "One producing stage, recorded so its output can be attributed and recomputed.\n\nA stage entry answers: which inputs, which tool at which exact revision, with\nwhich parameters, on which runtime, for how long, emitting which artifacts,\nand at which truth layer. Together with the input hashes it is also the\ncache key: an entry whose key cannot be recomputed is garbage, not a cache.",
+      "properties": {
+        "duration_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        },
+        "input_hashes": {
+          "additionalProperties": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "description": "Role name to content hash for every input this stage consumed.",
+          "title": "Input Hashes",
+          "type": "object"
+        },
+        "output_hashes": {
+          "additionalProperties": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "description": "Role name to content hash for every artifact this stage emitted.",
+          "title": "Output Hashes",
+          "type": "object"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "Parameters that affected the result, and therefore the cache key.",
+          "title": "Parameters",
+          "type": "object"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Runtime and backend actually used, e.g. 'cpython3.11 macos-arm64 mps'.",
+          "title": "Runtime"
+        },
+        "stage": {
+          "description": "Stage name, unique within a timeline, e.g. 'separation' or 'onsets.bass'.",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9_]+)*$",
+          "title": "Stage",
+          "type": "string"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "tool": {
+          "description": "Tool or model identity.",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Tool",
+          "type": "string"
+        },
+        "tool_revision": {
+          "description": "Exact revision of that tool: a version plus commit, never a branch.",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Tool Revision",
+          "type": "string"
+        },
+        "truth_layer": {
+          "$ref": "#/$defs/TruthLayer"
+        }
+      },
+      "required": [
+        "stage",
+        "tool",
+        "tool_revision",
+        "truth_layer"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "SourceAudio": {
+      "additionalProperties": false,
+      "description": "The evidence-bearing artifact this timeline is about.",
+      "properties": {
+        "channels": {
+          "anyOf": [
+            {
+              "maximum": 64,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channels"
+        },
+        "duration_s": {
+          "description": "Observed duration of that audio.",
+          "exclusiveMinimum": 0,
+          "title": "Duration S",
+          "type": "number"
+        },
+        "hash": {
+          "description": "Hash of the exact audio bytes the stages consumed.",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Hash",
+          "type": "string"
+        },
+        "sample_rate_hz": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sample Rate Hz"
+        }
+      },
+      "required": [
+        "hash",
+        "duration_s"
+      ],
+      "title": "SourceAudio",
+      "type": "object"
+    },
+    "Track": {
+      "additionalProperties": false,
+      "description": "A logical stream of observations, usually but not necessarily one stem.",
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/Event"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "id": {
+          "description": "Unique within a timeline.",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free-text role, e.g. 'bass'. A label for humans, not a taxonomy.",
+          "title": "Role"
+        },
+        "source": {
+          "description": "Artifact these observations came from, e.g. 'mix' or 'stems/drums.wav'.",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source"
+      ],
+      "title": "Track",
+      "type": "object"
+    },
+    "TruthLayer": {
+      "description": "Where a value came from. These never collapse into one another.\n\n``requested``\n    Authored before the audio existed. A prompt, a seed, a target BPM.\n``observed``\n    Measurable from the artifact by anyone holding it. A duration, a hash.\n``inferred``\n    A named model's opinion at an exact revision, with a confidence.\n``corrected``\n    A human override, recorded as its own stage rather than as an edit that\n    erases the inference it replaced.",
+      "enum": [
+        "requested",
+        "observed",
+        "inferred",
+        "corrected"
+      ],
+      "title": "TruthLayer",
+      "type": "string"
+    }
+  },
+  "$id": "https://spectral-loom.invalid/schemas/spectral-loom/song-timeline/0.1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The compiler boundary artifact: what was observed or inferred about one recording.",
+  "properties": {
+    "provenance": {
+      "description": "Every stage that contributed to this document, in production order.",
+      "items": {
+        "$ref": "#/$defs/Provenance"
+      },
+      "minItems": 1,
+      "title": "Provenance",
+      "type": "array"
+    },
+    "schema_id": {
+      "const": "spectral-loom/song-timeline",
+      "default": "spectral-loom/song-timeline",
+      "title": "Schema Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "0.1.0",
+      "default": "0.1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_audio": {
+      "$ref": "#/$defs/SourceAudio"
+    },
+    "specimen_id": {
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$",
+      "title": "Specimen Id",
+      "type": "string"
+    },
+    "time_unit": {
+      "const": "seconds",
+      "default": "seconds",
+      "description": "Explicit, because a timeline read years later must not have to guess.",
+      "title": "Time Unit",
+      "type": "string"
+    },
+    "tracks": {
+      "items": {
+        "$ref": "#/$defs/Track"
+      },
+      "title": "Tracks",
+      "type": "array"
+    }
+  },
+  "required": [
+    "specimen_id",
+    "source_audio",
+    "provenance"
+  ],
+  "title": "SongTimeline",
+  "type": "object"
+}

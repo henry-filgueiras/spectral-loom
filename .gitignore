@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+# Artifact policy, encoded. See docs/architecture.md and archaeology/decisions/0004.
+#
+# Tracked: source, tests, schemas, corpus specifications, prompts, small textual
+# fixtures, provenance manifests, Scarp archaeology, documentation.
+#
+# Untracked: anything a model produced, anything a model needs, anything a
+# renderer emitted, and anything that observes this repository.
+# ---------------------------------------------------------------------------
+
+# Model weights, checkpoints, and download caches.
+models/
+*.ckpt
+*.safetensors
+*.pt
+*.pth
+*.onnx
+.cache/
+huggingface/
+
+# Scratch space for pipeline stages and inferred artifacts.
+.work/
+outputs/
+
+# Generated audio and derived stems. `corpus/specs/` is tracked and is
+# deliberately not under either of these.
+corpus/generated/
+corpus/derived/
+
+# Loose audio and video anywhere in the tree. Audio is evidence, but it is
+# bulky and regenerable from a pinned spec plus a pinned model revision.
+*.wav
+*.flac
+*.mp3
+*.m4a
+*.ogg
+*.mp4
+*.mov
+
+# Timelines inferred during experimentation. A timeline worth keeping is
+# promoted deliberately, with provenance, never by a stray `git add`.
+*.timeline.json
+!tests/**/*.timeline.json
+
+# Local benchmark output, until something is explicitly promoted.
+benchmarks/results/
+
+# WitnessGlass. The recorder is armed per-repository and its recordings are
+# unredacted; neither the hook configuration nor the recordings are committed.
+# Only `.claude/settings.witnessglass.example.json` is tracked.
+.witnessglass/
+.claude/settings.local.json
+.claude/settings.local.json.displaced-by-witnessglass.*
+
+# Python environments and build output.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# macOS.
+.DS_Store

@@ -1,0 +1,62 @@
+# An example song specification for a future instrumental specimen.
+#
+# NOTHING HAS BEEN GENERATED FROM THIS FILE. It exists to exercise the SongSpec
+# contract and to show the shape a specimen request takes. No audio, no stems,
+# and no timeline exist for `sparse-funk-exposed-bass`.
+#
+# Every musical field below is a REQUEST, which is why each is named
+# `requested_*`. The generator may return 92 BPM when asked for 96, may drift
+# out of D minor, and may return no clean guitar at all. Only analysis of the
+# resulting audio can say what is actually there, and that analysis belongs in a
+# `song.timeline.json`, not here. See archaeology/principles/0001.
+#
+# Validate with:
+#   uv run spectral-loom validate-spec corpus/specs/example.yaml
+
+schema_id: spectral-loom/song-spec
+schema_version: 0.1.0
+
+specimen_id: sparse-funk-exposed-bass
+
+generator:
+  adapter: ace-step
+  model_id: ACE-Step/ACE-Step-v1.5
+  # Deliberately null: the revision is not resolved yet. A null revision must
+  # block generation rather than silently resolve to whatever `main` is on the
+  # day it runs. Gate 1 of docs/roadmap.md replaces this with a commit sha.
+  revision: null
+
+requested_prompt: >-
+  Sparse instrumental funk at a relaxed walking pace. Exposed electric bass
+  carrying the melody with plenty of space between phrases, dry and close-miked.
+  Tight acoustic drum kit, rimshot-heavy, no fills. Clean single-coil electric
+  guitar playing muted sixteenth-note skank on the offbeats, well behind the
+  bass. No vocals, no synth pads, no horns. Leave silence between phrases.
+
+seed: 20260820
+
+requested_duration_s: 45.0
+requested_bpm: 96.0
+requested_key: D minor
+requested_time_signature: 4/4
+
+# What the prompt asks for. Sparse and few on purpose: this specimen exists to
+# make separation and per-stem analysis legible, and three well-separated parts
+# with real silence between them is the easiest case to check by ear.
+requested_instruments:
+  - electric bass
+  - drum kit
+  - clean electric guitar
+
+# Generator-specific parameters, contained here so they cannot leak into the
+# envelope. These keys are ACE-Step's vocabulary, not this project's, and they
+# are unvalidated placeholders until the adapter exists.
+generator_params:
+  guidance_scale: 7.5
+  scheduler: euler
+  audio_format: wav
+
+notes: >-
+  Acceptance for gate 2 is by ear, not by metric: bass audible and separable,
+  audible silence between phrases, no vocal bleed. If the result fails, record
+  what failed before changing the prompt.

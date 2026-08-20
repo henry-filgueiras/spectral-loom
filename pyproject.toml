@@ -1,0 +1,63 @@
+[project]
+name = "spectral-loom"
+version = "0.0.1"
+description = "Compile music into a source-grounded semantic timeline, then weave that timeline into synchronized visual projections."
+readme = "README.md"
+requires-python = "==3.11.*"
+license = { file = "LICENSE" }
+authors = [{ name = "Henry Filgueiras" }]
+keywords = ["music", "audio-analysis", "timeline", "provenance", "visualization"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "pydantic>=2.9,<3",
+    # Corpus specifications are authored by hand and are therefore YAML.
+    # This is the only reason PyYAML is here; nothing else parses YAML.
+    "pyyaml>=6,<7",
+]
+
+[project.scripts]
+spectral-loom = "spectral_loom.cli:main"
+
+[project.urls]
+Repository = "https://github.com/henry-filgueiras/spectral-loom"
+
+# Model integrations will arrive as optional dependency groups here, or as
+# separately managed pinned environments; see archaeology/decisions/0005.
+# Nothing heavyweight belongs in `dependencies`. No group exists yet.
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<9",
+    "ruff>=0.8,<1",
+    "mypy>=1.13,<2",
+    "types-pyyaml>=6,<7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spectral_loom"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
