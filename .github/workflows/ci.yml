@@ -1,0 +1,56 @@
+name: ci
+
+# Verification only. Nothing here downloads a model, generates audio, or
+# publishes anything, and nothing here pushes to this repository.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # --locked fails on a drifted lockfile rather than quietly repairing it:
+      # a lockfile that CI silently fixes is not a lockfile.
+      - name: Install from the committed lockfile
+        run: uv sync --locked
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Types
+        run: uv run mypy
+
+      # The committed JSON Schemas are the reviewable projection of the Python
+      # contracts. If they disagree, the boundary artifact has stopped
+      # describing the code.
+      - name: Schema drift
+        run: uv run python -m spectral_loom.schemas
+
+      - name: Tests
+        run: uv run pytest
+
+      - name: Example corpus specification validates
+        run: uv run spectral-loom validate-spec corpus/specs/example.yaml
+
+      - name: Doctor
+        run: uv run spectral-loom doctor
