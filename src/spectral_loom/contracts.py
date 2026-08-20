@@ -20,6 +20,13 @@ Three documents matter, and they are deliberately small:
     about the file and the *request* that produced it, and never the request
     dressed up as an observation.
 
+``SpecimenReview``
+    What a human decided about one exact rendering after listening to it. It is
+    tracked, unlike the audio it is about, so it is the only record that
+    survives a clean clone of a gate having been passed by ears rather than by
+    a program. It is keyed by the audio's hash, because a specimen id names an
+    intent and two renderings of one intent are two different recordings.
+
 All three carry an explicit ``schema_id`` and ``schema_version``. The version is a
 ``Literal``, on purpose: bumping it is a code change with a reviewable diff and
 a regenerated JSON Schema, rather than a string that silently drifts. Documents
@@ -38,7 +45,7 @@ Scope discipline for the timeline, restated because it is easy to lose:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated, Final, Literal
 
@@ -53,9 +60,17 @@ TIMELINE_SCHEMA_VERSION: Final = "0.1.0"
 GENERATION_SCHEMA_ID: Final = "spectral-loom/generation-manifest"
 GENERATION_SCHEMA_VERSION: Final = "0.1.0"
 
+REVIEW_SCHEMA_ID: Final = "spectral-loom/specimen-review"
+REVIEW_SCHEMA_VERSION: Final = "0.1.0"
+
 #: Slug-shaped stable identifier for a specimen. Stable across regeneration:
 #: it names the *intent*, while the audio hash names a particular rendering.
 SpecimenId = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{2,63}$")]
+
+#: A lowercase identifier for something this project names: a review criterion,
+#: a stem, a diagnostic. Same shape as a specimen id, and deliberately not a
+#: free string, so an identifier stays quotable in a path and a URL.
+Slug = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{2,63}$")]
 
 #: A content hash, algorithm-prefixed so a future migration is legible.
 ContentHash = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -424,4 +439,181 @@ class GenerationManifest(Contract):
         duplicate = {s for s in stages if stages.count(s) > 1}
         if duplicate:
             raise ValueError(f"duplicate provenance stage names: {sorted(duplicate)}")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Specimen review: what a human decided about one exact rendering.
+# ---------------------------------------------------------------------------
+
+
+class CriterionResponse(StrEnum):
+    """A reviewer's answer to one criterion.
+
+    ``UNCLEAR`` exists so that a reviewer who could not tell is not forced to
+    say "no". The distinction matters for the same reason it matters everywhere
+    else in this project: not detecting something and establishing its absence
+    are different claims.
+    """
+
+    YES = "yes"
+    NO = "no"
+    UNCLEAR = "unclear"
+
+
+class ReviewCriterion(Contract):
+    """One question a reviewer was asked, and what they answered.
+
+    The question travels with the answer on purpose. A bare ``{"bass": "yes"}``
+    read two years later is uninterpretable, and a criterion whose wording
+    changed silently would make two reviews look comparable when they are not.
+    """
+
+    id: Slug = Field(description="Stable identifier for this criterion within its question set.")
+    question: str = Field(
+        min_length=1,
+        max_length=500,
+        description="Exactly what the reviewer was asked, in the wording they were asked it.",
+    )
+    response: CriterionResponse
+    notes: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="The reviewer's own qualification of their answer, if they gave one.",
+    )
+
+
+class HumanReview(Contract):
+    """A human's judgement about an artifact's fitness for a purpose.
+
+    **This is deliberately not one of the four truth layers**, and the omission
+    is the careful part. ``requested``, ``observed``, ``inferred`` and
+    ``corrected`` classify *claims about a recording* by where the claim came
+    from. "I accept these bytes as this project's first experimental specimen"
+    is not a claim about the recording at all: it is a claim about the project.
+    Nothing here says the audio contains a bass, a tempo, or a key.
+
+    So a review is not a :class:`Provenance` entry either. A provenance entry
+    records a stage so its output can be attributed and recomputed; a review
+    emits no artifact and cannot be recomputed, and giving a person a
+    ``tool_revision`` would be a fiction. See ``archaeology/decisions/0010``.
+
+    What the answers *do* record is what a named person perceived on a named
+    day. ``bass-audible-and-exposed: yes`` means the reviewer heard something
+    they call an exposed bass. It does not establish that the source contains an
+    electric bass, and no downstream stage may read it as though it did.
+    """
+
+    reviewer: str = Field(
+        min_length=1, max_length=200, description="Who listened. A person, named."
+    )
+    reviewed_on: date = Field(
+        description="The day they listened. A judgement is dated, not versioned."
+    )
+    method: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="How the artifact was reviewed, in enough detail to know what was not done.",
+    )
+    criteria: list[ReviewCriterion] = Field(
+        min_length=1, description="Every question put to the reviewer, with their answer."
+    )
+    accepted: bool = Field(
+        description=(
+            "Whether the reviewer accepts these exact bytes for the purpose in `purpose`. "
+            "Never a claim that any requested instrument, tempo, or key was established."
+        )
+    )
+    purpose: str = Field(
+        min_length=1,
+        max_length=500,
+        description="What acceptance would mean. Stated, so that it cannot be quietly widened.",
+    )
+    notes: str | None = Field(
+        default=None,
+        max_length=4000,
+        description=(
+            "Free prose. On a rejection this is where what was wrong goes, because a record "
+            "that can only say yes is a marketing document."
+        ),
+    )
+
+
+class SpecimenReview(Contract):
+    """The tracked record that one human judged one exact rendering.
+
+    The audio is untracked and regenerable; this document is tracked and is not.
+    From a clean clone it is the only surviving statement that anybody ever
+    listened, which is why it restates the observations rather than pointing at
+    a manifest that may not be on the machine.
+
+    **Keyed by the audio hash, not by the specimen id.** A specimen id names an
+    intent and survives regeneration, so `sparse-funk-exposed-bass` may later
+    point at bytes nobody has heard. A stage that wants to know whether its
+    input was accepted must compare hashes, and this contract is shaped so that
+    comparing hashes is the easy thing to do.
+
+    The truth-layer discipline is unchanged. ``source_audio`` is observed.
+    ``provenance`` is copied from the generation manifest and keeps its own
+    layers, so the prompt stays labelled as the request it was. ``review`` is a
+    human's judgement about fitness and is not a layer at all; see
+    :class:`HumanReview`.
+    """
+
+    schema_id: Literal["spectral-loom/specimen-review"] = REVIEW_SCHEMA_ID
+    schema_version: Literal["0.1.0"] = REVIEW_SCHEMA_VERSION
+
+    specimen_id: SpecimenId
+    spec_path: str = Field(min_length=1, max_length=512)
+    spec_hash: ContentHash = Field(
+        description="Hash of the exact specification bytes the reviewed rendering came from."
+    )
+
+    source_audio: SourceAudio = Field(
+        description="Observed properties of the exact bytes that were listened to."
+    )
+
+    generation_manifest_hash: ContentHash = Field(
+        description=(
+            "Hash of the generation manifest as it stood when the review was recorded. The "
+            "manifest is untracked; this makes it possible to notice that it has since changed."
+        )
+    )
+    cabinet_hash: ContentHash = Field(
+        description=(
+            "Hash of `model-cabinet.toml` as it stood at review time. The cabinet is the "
+            "project's statement of what its model names mean, and re-pinning it changes what "
+            "a later regeneration of this specimen would be."
+        )
+    )
+
+    provenance: list[Provenance] = Field(
+        min_length=1,
+        description=(
+            "The producing stages, copied verbatim from the generation manifest, so the "
+            "accepted bytes stay attributable without that manifest being present."
+        ),
+    )
+
+    review: HumanReview
+
+    @model_validator(mode="after")
+    def _check_review(self) -> SpecimenReview:
+        stages = [p.stage for p in self.provenance]
+        duplicate = {s for s in stages if stages.count(s) > 1}
+        if duplicate:
+            raise ValueError(f"duplicate provenance stage names: {sorted(duplicate)}")
+
+        ids = [c.id for c in self.review.criteria]
+        repeated = {c for c in ids if ids.count(c) > 1}
+        if repeated:
+            raise ValueError(f"duplicate review criterion ids: {sorted(repeated)}")
+
+        emitted = {h for p in self.provenance for h in p.output_hashes.values()}
+        if emitted and self.source_audio.hash not in emitted:
+            raise ValueError(
+                f"the reviewed audio {self.source_audio.hash} is not among the artifacts this "
+                f"document's provenance says were produced ({sorted(emitted)}); a review must "
+                f"be about bytes its own record can attribute"
+            )
         return self

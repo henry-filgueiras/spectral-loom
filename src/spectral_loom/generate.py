@@ -36,7 +36,6 @@ environment, where torch is absent by design.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import platform
 import sys
@@ -56,6 +55,7 @@ from spectral_loom.contracts import (
     SourceAudio,
     TruthLayer,
 )
+from spectral_loom.hashing import hash_bytes, hash_file
 
 #: Generated audio lands here. Ignored by Git: it is bulky, and it is
 #: regenerable from a pinned specification plus a pinned revision.
@@ -66,8 +66,6 @@ MANIFEST_FILENAME = "generation-manifest.json"
 
 #: The stage name in the manifest's provenance. Namespaced, like every stage.
 GENERATE_STAGE = "generate"
-
-_HASH_CHUNK = 1024 * 1024
 
 
 class GenerationError(Exception):
@@ -175,18 +173,6 @@ class Plan:
     @property
     def specimen_id(self) -> str:
         return self.spec.specimen_id
-
-
-def hash_bytes(payload: bytes) -> str:
-    return "sha256:" + hashlib.sha256(payload).hexdigest()
-
-
-def hash_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(_HASH_CHUNK):
-            digest.update(chunk)
-    return "sha256:" + digest.hexdigest()
 
 
 def resolve_parameters(spec: SongSpec, entry: Entry) -> Extension:

@@ -44,6 +44,16 @@ Audio may also be supplied rather than generated. The pipeline does not care whi
 the hash is recorded. **Audio is never captured from a streaming service** — see the deferral list
 in [roadmap.md](roadmap.md).
 
+A **specimen review** is the one artifact at this layer that is tracked. Audio is regenerable and
+untracked; a person's decision about it is neither, so it is written down under `corpus/reviews/`
+in a versioned contract that copies the observations and provenance it needs in order to stand
+alone. It is keyed by the audio's hash rather than by the specimen id, because a specimen id names
+an *intent* and deliberately survives regeneration: a stage that gated on the id would be one
+prompt edit away from silently running on bytes nobody has heard. A human's judgement about an
+artifact's fitness is **not** one of the four truth layers below — those classify claims about a
+recording, and "these bytes are a usable specimen" is a claim about the project. See
+`archaeology/decisions/0010`.
+
 ### 3. Inferred semantic timeline
 
 Separation and analysis produce a `song.timeline.json`: an envelope carrying a schema id and

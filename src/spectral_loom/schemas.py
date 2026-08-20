@@ -24,6 +24,8 @@ from typing import Any
 from spectral_loom.contracts import (
     GENERATION_SCHEMA_ID,
     GENERATION_SCHEMA_VERSION,
+    REVIEW_SCHEMA_ID,
+    REVIEW_SCHEMA_VERSION,
     SPEC_SCHEMA_ID,
     SPEC_SCHEMA_VERSION,
     TIMELINE_SCHEMA_ID,
@@ -31,9 +33,10 @@ from spectral_loom.contracts import (
     GenerationManifest,
     SongSpec,
     SongTimeline,
+    SpecimenReview,
 )
 
-Exported = type[SongSpec] | type[SongTimeline] | type[GenerationManifest]
+Exported = type[SongSpec] | type[SongTimeline] | type[GenerationManifest] | type[SpecimenReview]
 
 SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 
@@ -45,6 +48,11 @@ EXPORTS: dict[str, tuple[Exported, str, str]] = {
         GenerationManifest,
         GENERATION_SCHEMA_ID,
         GENERATION_SCHEMA_VERSION,
+    ),
+    "specimen-review.schema.json": (
+        SpecimenReview,
+        REVIEW_SCHEMA_ID,
+        REVIEW_SCHEMA_VERSION,
     ),
 }
 

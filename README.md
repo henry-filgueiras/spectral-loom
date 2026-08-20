@@ -13,8 +13,12 @@ The model cabinet is pinned and stocked, and a `SongSpec` becomes generated audi
 that makes it attributable. **Everything after that is unimplemented:** no stem has been
 separated, no timeline has been inferred, and no pixel has been rendered.
 
-One 45-second candidate exists for `sparse-funk-exposed-bass`. It has not been listened to, and
-gate 2 is not passed by generating a file — it is passed by a human accepting one.
+One 45-second specimen exists for `sparse-funk-exposed-bass`, and **it has been heard.** Henry
+listened on 2026-08-20 and accepted it, so gate 2 is passed — by a human, which is the only way
+that gate can be passed. The acceptance is tracked even though the audio is not:
+`corpus/reviews/sparse-funk-exposed-bass.8ff73623a29d.review.json` names the exact accepted bytes,
+the reviewer, the date, and each criterion answer. What it accepts is narrow — *these bytes are
+suitable as an experimental specimen* — and it establishes nothing about what the audio contains.
 
 ## The pipeline this is built toward
 
@@ -86,6 +90,7 @@ published before the hub client is even imported. See [scripts/README.md](script
 ./loom validate-timeline path/to/song.timeline.json
 
 ./loom generate corpus/specs/example.yaml
+./loom accept sparse-funk-exposed-bass --reviewer Henry --reviewed-on 2026-08-20 ...
 ```
 
 `generate` is the only expensive command and the only one that needs the cabinet environment. It
@@ -93,6 +98,14 @@ never downloads; weights are a precondition the bootstrap establishes. It refuse
 specification whose generator revision is null or disagrees with the cabinet, and an unchanged
 request against an unchanged revision reuses the existing specimen rather than burning another
 inference run.
+
+`accept` records what a person decided after listening. It runs no model and reads no audio beyond
+hashing it, and the hash is the point: a specimen id names an *intent* and survives regeneration,
+so a matching directory name is not evidence that anyone heard these particular bytes. The review
+is written to `corpus/reviews/<specimen>.<hash>.review.json`, is tracked, carries every gate
+criterion with the exact wording it was asked in, and can record a rejection as readily as an
+acceptance. Downstream stages require a review of the hash they actually measured. See
+[archaeology/decisions/0010](archaeology/decisions/0010-record-a-human-s-acceptance-as-a-hash-keyed-specimen-review-not-as-a-truth-layer.md).
 
 `doctor` reports the OS and architecture, the Python version, the Apple chip and unified memory on
 macOS, `ffmpeg` and `uv`, the repository path, whether the cache and output locations are
@@ -125,18 +138,20 @@ Regenerate the schemas after any contract change with
 ## Artifact policy
 
 **Tracked:** source, tests, schemas, corpus specifications, prompts, small textual fixtures,
-provenance manifests, Scarp archaeology, documentation. `model-cabinet.toml` is the provenance
-manifest that must survive a clean clone, because it is the only record of which code and which
-bytes produced anything here. A per-specimen `generation-manifest.json` travels with its audio
-under `corpus/generated/` and is untracked with it — a record of a candidate nobody has accepted
-is not history yet, and promoting one is a deliberate act.
+provenance manifests, specimen reviews, Scarp archaeology, documentation. `model-cabinet.toml` is
+the provenance manifest that must survive a clean clone, because it is the only record of which
+code and which bytes produced anything here. A per-specimen `generation-manifest.json` travels with
+its audio under `corpus/generated/` and is untracked with it — a record of a candidate nobody has
+accepted is not history yet, and promoting one is a deliberate act. A `corpus/reviews/*.review.json`
+is that deliberate act: it is what a human decided, it copies the observations and the provenance
+it needs so it stands alone, and it is tracked precisely because the audio is not.
 
 **Never tracked:** model weights, Hugging Face caches, virtual environments, generated songs,
 separated stems, timelines inferred during experimentation, rendered video, WitnessGlass
 recordings, temporary audio, and local benchmark results unless something is explicitly promoted
 later. The ignored directories are `.work/`, `.cache/`, `models/`, `.venv-cabinet/`,
-`corpus/generated/`, `corpus/derived/`, and `outputs/`; `corpus/specs/`, `model-cabinet.toml`, and
-`archaeology/` are tracked and sit outside them deliberately.
+`corpus/generated/`, `corpus/derived/`, and `outputs/`; `corpus/specs/`, `corpus/reviews/`,
+`model-cabinet.toml`, and `archaeology/` are tracked and sit outside them deliberately.
 
 Expensive inference is cached independently of cheap rerendering, and every cache key includes
 the input hashes, the model revision, and the parameters that mattered. See
@@ -152,20 +167,10 @@ engraved sheet music, generalized DAW functionality, a large UI, and cloud infra
 
 ## Next experiment
 
-Gate 2 of [the roadmap](docs/roadmap.md), and it is not a coding task. One candidate exists and
-nobody has heard it:
+Gate 3 of [the roadmap](docs/roadmap.md): Demucs on the accepted specimen, with the stems listened
+to. Like gate 2 it ends with a human, not with a program.
 
-```sh
-afplay corpus/generated/sparse-funk-exposed-bass/source.wav
-```
-
-The questions are the ones the specification's own notes ask: is the bass audible and exposed, is
-there useful silence between phrases, are the parts separable by ear, and is there vocal bleed or
-another generator failure that would make this a poor experimental specimen. A rejection is
-recorded — including what was wrong — before the prompt is changed and another candidate is made.
-
-Gate 3 is Demucs on the accepted specimen, with the stems listened to. No corpus is generated
-before either.
+No corpus is generated before it passes.
 
 ## Project archaeology
 

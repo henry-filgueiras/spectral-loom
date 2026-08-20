@@ -6,11 +6,17 @@ Four commands. Three of them inspect and validate; one of them runs a model::
     spectral-loom validate-spec PATH [--json]
     spectral-loom validate-timeline PATH [--json]
     spectral-loom generate PATH [--json] [--force]
+    spectral-loom accept SPECIMEN --reviewer NAME --reviewed-on DATE ...
 
-``generate`` is the only one that is expensive, and it is the only one that
-needs the cabinet environment. It never downloads: weights are a precondition a
-human establishes with ``scripts/bootstrap_cabinet.py``, and generation that
-quietly fetches eleven gigabytes is not a pipeline stage, it is a surprise.
+``generate`` is expensive and needs the cabinet environment. It never downloads:
+weights are a precondition a human establishes with
+``scripts/bootstrap_cabinet.py``, and generation that quietly fetches eleven
+gigabytes is not a pipeline stage, it is a surprise.
+
+``accept`` is the opposite kind of command: it runs no model and produces no
+audio. It writes down what a person decided after listening, bound to the exact
+bytes they heard, because that judgement is the only part of gate 2 that a
+program cannot supply and the only part that has to survive a clean clone.
 
 Nothing here infers a timeline or renders anything. Those are later gates.
 
@@ -39,6 +45,7 @@ import platform
 import shutil
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -57,9 +64,29 @@ from spectral_loom.cabinet import (
     installed_versions,
     load_repository_cabinet,
 )
-from spectral_loom.contracts import GenerationManifest, SongSpec, SongTimeline
-from spectral_loom.generate import GenerationError, plan
+from spectral_loom.contracts import (
+    CriterionResponse,
+    GenerationManifest,
+    SongSpec,
+    SongTimeline,
+)
+from spectral_loom.generate import (
+    AUDIO_FILENAME,
+    GENERATED_DIRNAME,
+    MANIFEST_FILENAME,
+    GenerationError,
+    load_manifest,
+    plan,
+)
 from spectral_loom.generate import generate as run_generation
+from spectral_loom.hashing import hash_file
+from spectral_loom.review import (
+    GATE_2_CRITERIA,
+    ReviewError,
+    build_review,
+    review_path,
+    write_review,
+)
 
 EXIT_OK = 0
 EXIT_BLOCKED = 1
@@ -626,6 +653,149 @@ def _print_result(
 
 
 # ---------------------------------------------------------------------------
+# accept
+# ---------------------------------------------------------------------------
+
+
+def _criterion_dest(identifier: str) -> str:
+    """argparse destination for a criterion's flag."""
+    return identifier.replace("-", "_")
+
+
+def accept_command(
+    specimen_id: str,
+    *,
+    reviewer: str,
+    reviewed_on: date,
+    responses: dict[str, CriterionResponse],
+    notes: dict[str, str],
+    summary: str | None,
+    accepted: bool,
+    force: bool,
+    as_json: bool,
+    root: Path | None = None,
+) -> int:
+    """Write down what a human decided about one exact rendering.
+
+    The command's job is the binding, not the judgement. It finds the audio and
+    its manifest, **re-hashes the audio** rather than believing the manifest,
+    refuses if the two disagree, and then attaches the person's answers to the
+    hash it actually measured. A review that named a file instead of bytes would
+    be worth nothing the moment the file was regenerated.
+    """
+    repo = find_repository_root(root or Path.cwd())
+    directory = repo / GENERATED_DIRNAME / specimen_id
+    audio_path = directory / AUDIO_FILENAME
+    manifest_path = directory / MANIFEST_FILENAME
+
+    if not audio_path.is_file():
+        return _report_failure(
+            as_json,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                f"no generated audio at {audio_path}. Nothing can be reviewed that is not on "
+                f"this machine; generate the specimen first."
+            ],
+        )
+    if not manifest_path.is_file():
+        return _report_failure(
+            as_json,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                f"no generation manifest at {manifest_path}. The audio cannot be attributed "
+                f"to a specification or a revision, so accepting it would record a judgement "
+                f"about bytes of unknown origin."
+            ],
+        )
+
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+        manifest = load_manifest(manifest_path)
+        cabinet_bytes = (repo / CABINET_FILENAME).read_bytes()
+    except (OSError, GenerationError, ValidationError) as exc:
+        return _report_failure(as_json, EXIT_UNREADABLE, specimen_id, [str(exc)])
+
+    observed = hash_file(audio_path)
+    if observed != manifest.source_audio.hash:
+        return _report_failure(
+            as_json,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                f"{audio_path} hashes to {observed}, but {manifest_path.name} describes "
+                f"{manifest.source_audio.hash}. The manifest is a claim about a file that has "
+                f"since changed; regenerate before reviewing, because a review must be about "
+                f"bytes its own record can attribute."
+            ],
+        )
+
+    try:
+        review = build_review(
+            manifest,
+            manifest_bytes=manifest_bytes,
+            cabinet_bytes=cabinet_bytes,
+            reviewer=reviewer,
+            reviewed_on=reviewed_on,
+            responses=responses,
+            notes=notes,
+            accepted=accepted,
+            summary=summary,
+        )
+    except (ReviewError, ValidationError) as exc:
+        return _report_failure(as_json, EXIT_INVALID, specimen_id, [str(exc)])
+
+    target = review_path(repo, specimen_id, observed)
+    if target.exists() and not force:
+        return _report_failure(
+            as_json,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                f"{target} already records a review of exactly these bytes. Overwriting a "
+                f"recorded human judgement is a deliberate act; pass --force if that is what "
+                f"you mean."
+            ],
+        )
+    write_review(target, review)
+
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "specimen_id": specimen_id,
+                    "accepted": accepted,
+                    "review": str(target),
+                    "source_audio": review.source_audio.model_dump(mode="json"),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return EXIT_OK
+
+    print(f"{specimen_id}: {'accepted' if accepted else 'REJECTED'} by {reviewer} on {reviewed_on}")
+    print(f"  audio       {audio_path}")
+    print(f"  sha256      {observed}")
+    print(
+        f"  observed    {review.source_audio.duration_s:.2f} s, "
+        f"{review.source_audio.sample_rate_hz} Hz, {review.source_audio.channels} ch"
+    )
+    print(f"  review      {target}")
+    print()
+    for item in review.review.criteria:
+        print(f"  {item.response.value:<8} {item.id}")
+        if item.notes:
+            print(f"           {item.notes}")
+    if review.review.notes:
+        print(f"  {review.review.notes}")
+        print()
+    print(review.review.purpose if accepted else "Nothing downstream runs on a rejected specimen.")
+    return EXIT_OK
+
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -686,7 +856,66 @@ def build_parser() -> argparse.ArgumentParser:
         help="regenerate even when an existing specimen matches this exact request",
     )
 
+    accept_parser = subparsers.add_parser(
+        "accept",
+        help="record a human's verdict on one generated specimen, bound to its exact hash",
+        description=(
+            "Writes a tracked review of the exact bytes on disk for one specimen. Runs no "
+            "model and reads no audio beyond hashing it. Every gate 2 criterion must be "
+            "answered: a review with a blank question is a partially examined assumption. "
+            "Use --reject to record a rejection, which is history too."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    accept_parser.add_argument("specimen_id", help="specimen id, e.g. sparse-funk-exposed-bass")
+    accept_parser.add_argument("--reviewer", required=True, help="who listened")
+    accept_parser.add_argument(
+        "--reviewed-on",
+        required=True,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="the day they listened",
+    )
+    for item in GATE_2_CRITERIA:
+        accept_parser.add_argument(
+            item.flag,
+            required=True,
+            dest=_criterion_dest(item.id),
+            choices=[r.value for r in CriterionResponse],
+            help=item.help,
+        )
+    accept_parser.add_argument(
+        "--note",
+        action="append",
+        default=[],
+        metavar="CRITERION=TEXT",
+        help="qualify one criterion's answer; repeatable",
+    )
+    accept_parser.add_argument(
+        "--summary", help="free prose; on a rejection, what was wrong with the candidate"
+    )
+    accept_parser.add_argument(
+        "--reject",
+        action="store_true",
+        help="record a rejection rather than an acceptance",
+    )
+    accept_parser.add_argument(
+        "--force", action="store_true", help="overwrite an existing review of these exact bytes"
+    )
+    accept_parser.add_argument("--json", action="store_true", help="machine-readable output")
+
     return parser
+
+
+def parse_notes(entries: list[str]) -> dict[str, str]:
+    """Split `--note criterion=text` pairs, refusing anything that is not one."""
+    notes: dict[str, str] = {}
+    for entry in entries:
+        name, separator, text = entry.partition("=")
+        if not separator or not name.strip() or not text.strip():
+            raise ReviewError(f"--note must be CRITERION=TEXT, found {entry!r}")
+        notes[name.strip()] = text.strip()
+    return notes
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -700,6 +929,25 @@ def main(argv: list[str] | None = None) -> int:
         return validate(args.path, SongTimeline, "song timeline", as_json=args.json)
     if args.command == "generate":
         return generate_command(args.path, as_json=args.json, force=args.force)
+    if args.command == "accept":
+        try:
+            notes = parse_notes(args.note)
+        except ReviewError as exc:
+            return _report_failure(args.json, EXIT_INVALID, args.specimen_id, [str(exc)])
+        return accept_command(
+            args.specimen_id,
+            reviewer=args.reviewer,
+            reviewed_on=args.reviewed_on,
+            responses={
+                item.id: CriterionResponse(getattr(args, _criterion_dest(item.id)))
+                for item in GATE_2_CRITERIA
+            },
+            notes=notes,
+            summary=args.summary,
+            accepted=not args.reject,
+            force=args.force,
+            as_json=args.json,
+        )
 
     raise AssertionError(f"unreachable: unhandled command {args.command!r}")
 

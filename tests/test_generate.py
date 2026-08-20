@@ -37,8 +37,6 @@ from spectral_loom.generate import (
     GENERATE_STAGE,
     GenerationError,
     Plan,
-    hash_bytes,
-    hash_file,
     observe_wav,
     plan,
     resolve_parameters,
@@ -46,6 +44,7 @@ from spectral_loom.generate import (
     runtime_identity,
     write_manifest,
 )
+from spectral_loom.hashing import hash_bytes, hash_file
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO_ROOT / "corpus" / "specs" / "example.yaml"

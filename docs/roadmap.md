@@ -30,18 +30,22 @@ second run verified 11.1 GB against upstream sha256 and downloaded nothing with 
 socket raising. `scripts/smoke_cabinet.py` ran each entry once: Basic Pitch on the CoreML
 `.mlpackage`, Demucs and ACE-Step on MPS.
 
-## Gate 2 — One specimen, accepted by ear ⏳
+## Gate 2 — One specimen, accepted by ear ✅
 
-Generate a single 30–60 second instrumental specimen from `corpus/specs/example.yaml` with a
-resolved revision. Listen to it. Accept or reject it as a human.
+Done. Henry listened to the whole file on 2026-08-20 and accepted it, on the first candidate, with
+no rejected attempts.
 
-**Where it stands:** one candidate exists for `sparse-funk-exposed-bass` — 45.00 s, 48 kHz stereo,
-generated on MPS from the pinned turbo checkpoint, byte-reproducible across runs. **Nobody has
-heard it.** The gate is not passed by generating; it is passed by a human listening.
+**Evidence:** `corpus/reviews/sparse-funk-exposed-bass.8ff73623a29d.review.json`, tracked, naming
+the exact accepted bytes — `sha256:8ff73623…9aa628`, 45.00 s, 48 kHz, stereo — the reviewer, the
+date, and all four criterion answers. Bass audible and exposed: yes. Useful silence between
+phrases: yes, with the drums continuous and the other instruments leaving arrangement space. Parts
+separable by ear: yes. Vocal bleed or another obvious generator failure: none perceived.
 
-**Passes when:** one specimen exists, has been listened to, and has been accepted — with the
-acceptance recorded, including what was wrong with any rejected attempts. **No corpus is generated
-before this gate passes.**
+What was accepted is narrow and the receipt says so: **these exact bytes are suitable as this
+project's first experimental specimen.** Nothing about the requested tempo, key, or instruments was
+established — nobody has analysed the audio, and a listener's ear is not a measurement. See
+`archaeology/decisions/0010` for why the acceptance is keyed by hash rather than by specimen id,
+and why a human judgement is not one of the four truth layers.
 
 ## Gate 3 — Separation, inspected
 

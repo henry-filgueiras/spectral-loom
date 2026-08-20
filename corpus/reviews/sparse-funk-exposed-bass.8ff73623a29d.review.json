@@ -1,0 +1,79 @@
+{
+  "cabinet_hash": "sha256:621986daa76e25fcde2721e2e84d2ff2ee2b3d0a49d67bb64f0a8e2a76bf3f2c",
+  "generation_manifest_hash": "sha256:0a690389d1bcea2fce535d57d94d37901a1315b322fc1f6373c40f147cba1dce",
+  "provenance": [
+    {
+      "duration_ms": 15651,
+      "input_hashes": {
+        "spec": "sha256:26e16131f5124379f5bc9ab0b79792a21666fc277da12b2cc558586c10b6125a"
+      },
+      "output_hashes": {
+        "source": "sha256:8ff73623a29d213b0732296c5dfbff1aa8908fc2a78647b14ed754209b9aa628"
+      },
+      "parameters": {
+        "audio_duration": 45.0,
+        "dtype": "bfloat16",
+        "lyrics": "",
+        "num_inference_steps": 8,
+        "prompt": "Sparse instrumental funk at a relaxed walking pace. Exposed electric bass carrying the melody with plenty of space between phrases, dry and close-miked. Tight acoustic drum kit, rimshot-heavy, no fills. Clean single-coil electric guitar playing muted sixteenth-note skank on the offbeats, well behind the bass. No vocals, no synth pads, no horns. Leave silence between phrases.",
+        "requested_bpm": 96,
+        "requested_keyscale": "D minor",
+        "requested_timesignature": "4",
+        "seed": 20260820,
+        "shift": 3.0,
+        "task_type": "text2music"
+      },
+      "runtime": "cpython3.11 darwin-arm64 mps",
+      "stage": "generate",
+      "started_at": "2026-08-20T22:28:31.023989Z",
+      "tool": "diffusers.AceStepPipeline",
+      "tool_revision": "diffusers==0.40.0 ACE-Step/acestep-v15-xl-turbo-diffusers@200ba991ae448051e14b0183157e35c2d27c9fb0",
+      "truth_layer": "requested"
+    }
+  ],
+  "review": {
+    "accepted": true,
+    "criteria": [
+      {
+        "id": "bass-audible-and-exposed",
+        "notes": null,
+        "question": "Is the bass audible and exposed?",
+        "response": "yes"
+      },
+      {
+        "id": "useful-silence-between-phrases",
+        "notes": "The drums remain continuous, but the other instruments leave meaningful arrangement space.",
+        "question": "Is there useful silence between phrases?",
+        "response": "yes"
+      },
+      {
+        "id": "parts-separable-by-ear",
+        "notes": null,
+        "question": "Are the parts separable by ear?",
+        "response": "yes"
+      },
+      {
+        "id": "generator-failure-perceived",
+        "notes": "No vocal bleed and no other obvious generator failure perceived.",
+        "question": "Was vocal bleed or another obvious generator failure perceived? In this context vocal bleed means unintended singing, humming, speech fragments, breathy vowel sounds, or voice-like pads despite the no-vocals request.",
+        "response": "no"
+      }
+    ],
+    "method": "Listened to the complete file. Unaided ears, no analysis, no separation, no measurement beyond the observed duration, sample rate, channel count and hash recorded here.",
+    "notes": "Accepted for downstream experimentation. The reviewer reports hearing an exposed bass line, arrangement space between phrases, and parts he could follow individually. Nothing here has been measured or analysed: what the audio actually contains remains open until a timeline says so.",
+    "purpose": "These exact bytes are suitable as this project's first experimental specimen. This is not a claim that any requested instrument, tempo, or key was objectively established: nothing has analysed the audio, and what it contains remains an open question for a song.timeline.json to answer.",
+    "reviewed_on": "2026-08-20",
+    "reviewer": "Henry"
+  },
+  "schema_id": "spectral-loom/specimen-review",
+  "schema_version": "0.1.0",
+  "source_audio": {
+    "channels": 2,
+    "duration_s": 45.0,
+    "hash": "sha256:8ff73623a29d213b0732296c5dfbff1aa8908fc2a78647b14ed754209b9aa628",
+    "sample_rate_hz": 48000
+  },
+  "spec_hash": "sha256:26e16131f5124379f5bc9ab0b79792a21666fc277da12b2cc558586c10b6125a",
+  "spec_path": "corpus/specs/example.yaml",
+  "specimen_id": "sparse-funk-exposed-bass"
+}

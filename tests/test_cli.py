@@ -396,3 +396,175 @@ def test_generate_anchors_on_the_cabinet_not_on_git(
     assert not (path.parent / ".git").exists()
     assert main(["generate", str(path)]) == EXIT_BLOCKED
     assert "cannot read" in capsys.readouterr().err, "no manifest beside it, and it says so"
+
+
+# --- accept ----------------------------------------------------------------
+#
+# `accept` is the one command whose whole job is binding a human's words to a
+# specific byte stream, so what is worth testing is what it refuses to bind.
+
+
+def _accept_fixture(root: Path, *, audio: bytes = b"RIFF....WAVEfmt ") -> tuple[Path, str]:
+    """A repository-shaped directory with one generated specimen in it."""
+    (root / CABINET_FILENAME).write_text(
+        (REPO_ROOT / CABINET_FILENAME).read_text(), encoding="utf-8"
+    )
+    directory = root / "corpus/generated/sparse-funk-exposed-bass"
+    directory.mkdir(parents=True)
+    audio_path = directory / "source.wav"
+    audio_path.write_bytes(audio)
+    digest = "sha256:" + hashlib.sha256(audio).hexdigest()
+
+    manifest = {
+        "schema_id": "spectral-loom/generation-manifest",
+        "schema_version": "0.1.0",
+        "specimen_id": "sparse-funk-exposed-bass",
+        "spec_path": "corpus/specs/example.yaml",
+        "spec_hash": "sha256:" + "c" * 64,
+        "source_audio": {
+            "hash": digest,
+            "duration_s": 45.0,
+            "sample_rate_hz": 48000,
+            "channels": 2,
+        },
+        "provenance": [
+            {
+                "stage": "generate",
+                "tool": "diffusers.AceStepPipeline",
+                "tool_revision": "diffusers==0.40.0 x@" + "0" * 40,
+                "truth_layer": "requested",
+                "input_hashes": {"spec": "sha256:" + "c" * 64},
+                "parameters": {"prompt": "sparse instrumental", "seed": 1},
+                "output_hashes": {"source": digest},
+            }
+        ],
+    }
+    (directory / "generation-manifest.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8"
+    )
+    return audio_path, digest
+
+
+ACCEPT_ANSWERS = [
+    "--bass-exposed",
+    "yes",
+    "--silence-between-phrases",
+    "yes",
+    "--parts-separable",
+    "yes",
+    "--generator-failure",
+    "no",
+]
+
+
+def _accept_argv(*extra: str) -> list[str]:
+    return [
+        "accept",
+        "sparse-funk-exposed-bass",
+        "--reviewer",
+        "Henry",
+        "--reviewed-on",
+        "2026-08-20",
+        *ACCEPT_ANSWERS,
+        *extra,
+    ]
+
+
+def test_accept_writes_a_review_keyed_by_the_hash_it_measured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, digest = _accept_fixture(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert main(_accept_argv("--json")) == EXIT_OK
+
+    written = sorted((tmp_path / "corpus/reviews").glob("*.review.json"))
+    assert len(written) == 1
+    assert digest.split(":")[1][:12] in written[0].name
+    document = json.loads(written[0].read_text())
+    assert document["source_audio"]["hash"] == digest
+    assert document["review"]["accepted"] is True
+    assert document["review"]["reviewer"] == "Henry"
+
+
+def test_accept_refuses_when_the_audio_no_longer_matches_its_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The manifest is a claim about a file, and the file is what is reviewed."""
+    audio_path, _ = _accept_fixture(tmp_path)
+    audio_path.write_bytes(b"different bytes entirely")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(_accept_argv()) == EXIT_BLOCKED
+    assert "has since changed" in capsys.readouterr().err
+
+
+def test_accept_refuses_without_a_generation_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Accepting unattributable bytes would record a judgement about nothing."""
+    _accept_fixture(tmp_path)
+    (tmp_path / "corpus/generated/sparse-funk-exposed-bass/generation-manifest.json").unlink()
+    monkeypatch.chdir(tmp_path)
+
+    assert main(_accept_argv()) == EXIT_BLOCKED
+    assert "cannot be attributed" in capsys.readouterr().err
+
+
+def test_accept_will_not_quietly_overwrite_a_recorded_judgement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _accept_fixture(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert main(_accept_argv()) == EXIT_OK
+    assert main(_accept_argv()) == EXIT_BLOCKED
+    assert "deliberate act" in capsys.readouterr().err
+    assert main(_accept_argv("--force")) == EXIT_OK
+
+
+def test_accept_records_a_rejection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _accept_fixture(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    argv = [
+        "accept",
+        "sparse-funk-exposed-bass",
+        "--reviewer",
+        "Henry",
+        "--reviewed-on",
+        "2026-08-20",
+        "--bass-exposed",
+        "no",
+        "--silence-between-phrases",
+        "unclear",
+        "--parts-separable",
+        "no",
+        "--generator-failure",
+        "yes",
+        "--reject",
+        "--summary",
+        "voice-like pad throughout; the bass is buried",
+    ]
+    assert main(argv) == EXIT_OK
+
+    written = next((tmp_path / "corpus/reviews").glob("*.review.json"))
+    document = json.loads(written.read_text())
+    assert document["review"]["accepted"] is False
+    assert "buried" in document["review"]["notes"]
+
+
+def test_accept_requires_every_criterion(tmp_path: Path) -> None:
+    """A review with a blank question is a partially examined assumption."""
+    with pytest.raises(SystemExit) as caught:
+        main(["accept", "x", "--reviewer", "H", "--reviewed-on", "2026-08-20"])
+    assert caught.value.code == 2  # argparse's own usage error
+
+
+def test_accept_rejects_a_malformed_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _accept_fixture(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert main(_accept_argv("--note", "no-equals-sign")) == EXIT_INVALID
+    assert "CRITERION=TEXT" in capsys.readouterr().err
