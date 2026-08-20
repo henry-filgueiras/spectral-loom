@@ -1,0 +1,229 @@
+{
+  "$defs": {
+    "JsonValue": {},
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "One producing stage, recorded so its output can be attributed and recomputed.\n\nA stage entry answers: which inputs, which tool at which exact revision, with\nwhich parameters, on which runtime, for how long, emitting which artifacts,\nand at which truth layer. Together with the input hashes it is also the\ncache key: an entry whose key cannot be recomputed is garbage, not a cache.",
+      "properties": {
+        "duration_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        },
+        "input_hashes": {
+          "additionalProperties": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "description": "Role name to content hash for every input this stage consumed.",
+          "title": "Input Hashes",
+          "type": "object"
+        },
+        "output_hashes": {
+          "additionalProperties": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "description": "Role name to content hash for every artifact this stage emitted.",
+          "title": "Output Hashes",
+          "type": "object"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "Parameters that affected the result, and therefore the cache key.",
+          "title": "Parameters",
+          "type": "object"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Runtime and backend actually used, e.g. 'cpython3.11 macos-arm64 mps'.",
+          "title": "Runtime"
+        },
+        "stage": {
+          "description": "Stage name, unique within a timeline, e.g. 'separation' or 'onsets.bass'.",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9_]+)*$",
+          "title": "Stage",
+          "type": "string"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "tool": {
+          "description": "Tool or model identity.",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Tool",
+          "type": "string"
+        },
+        "tool_revision": {
+          "description": "Exact revision of that tool: a version plus commit, never a branch.",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Tool Revision",
+          "type": "string"
+        },
+        "truth_layer": {
+          "$ref": "#/$defs/TruthLayer"
+        }
+      },
+      "required": [
+        "stage",
+        "tool",
+        "tool_revision",
+        "truth_layer"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "SourceAudio": {
+      "additionalProperties": false,
+      "description": "The evidence-bearing artifact this timeline is about.",
+      "properties": {
+        "channels": {
+          "anyOf": [
+            {
+              "maximum": 64,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channels"
+        },
+        "duration_s": {
+          "description": "Observed duration of that audio.",
+          "exclusiveMinimum": 0,
+          "title": "Duration S",
+          "type": "number"
+        },
+        "hash": {
+          "description": "Hash of the exact audio bytes the stages consumed.",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Hash",
+          "type": "string"
+        },
+        "sample_rate_hz": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sample Rate Hz"
+        }
+      },
+      "required": [
+        "hash",
+        "duration_s"
+      ],
+      "title": "SourceAudio",
+      "type": "object"
+    },
+    "TruthLayer": {
+      "description": "Where a value came from. These never collapse into one another.\n\n``requested``\n    Authored before the audio existed. A prompt, a seed, a target BPM.\n``observed``\n    Measurable from the artifact by anyone holding it. A duration, a hash.\n``inferred``\n    A named model's opinion at an exact revision, with a confidence.\n``corrected``\n    A human override, recorded as its own stage rather than as an edit that\n    erases the inference it replaced.",
+      "enum": [
+        "requested",
+        "observed",
+        "inferred",
+        "corrected"
+      ],
+      "title": "TruthLayer",
+      "type": "string"
+    }
+  },
+  "$id": "https://spectral-loom.invalid/schemas/spectral-loom/generation-manifest/0.1.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The record that makes one generated audio file auditable.\n\nWritten beside the audio, which is untracked, so this is what answers the\nseven questions in ``docs/provenance.md`` about a file nobody can regenerate\nfrom memory.\n\nThe truth-layer rule does the most work here, because generation is exactly\nwhere it is easiest to break. The prompt asked for 96 BPM in D minor with an\nelectric bass. **None of that appears in this document as a fact about the\naudio.** What appears is:\n\n- ``source_audio``: hash, duration, sample rate, channel count. Observed,\n  measurable by anyone holding the file.\n- ``provenance``: one stage at ``truth_layer: requested``, whose\n  ``parameters`` carry the prompt, the seed, and every value handed to the\n  generator \u2014 labelled as the request they are.\n- ``spec_hash``: the exact bytes of the specification that was read, so the\n  whole request is recoverable without being restated here in a form that\n  could be mistaken for a measurement.\n\nWhether the audio actually contains a bass is a question for a\n``SongTimeline``, produced by analysing the audio. It is not answerable from\nthis document and this document does not pretend otherwise. See\n``archaeology/principles/0001``.",
+  "properties": {
+    "provenance": {
+      "description": "Every stage that contributed, in production order. The generating stage is `truth_layer: requested`: it emits evidence rather than a claim about evidence, and its parameters are what was asked for.",
+      "items": {
+        "$ref": "#/$defs/Provenance"
+      },
+      "minItems": 1,
+      "title": "Provenance",
+      "type": "array"
+    },
+    "schema_id": {
+      "const": "spectral-loom/generation-manifest",
+      "default": "spectral-loom/generation-manifest",
+      "title": "Schema Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "0.1.0",
+      "default": "0.1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_audio": {
+      "$ref": "#/$defs/SourceAudio",
+      "description": "Observed properties of the generated file. Measured, never requested."
+    },
+    "spec_hash": {
+      "description": "Hash of the exact specification bytes that produced this artifact.",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Spec Hash",
+      "type": "string"
+    },
+    "spec_path": {
+      "description": "Where the specification was read from. A claim about where a file was, which is why `spec_hash` is beside it: only the hash survives the file being moved.",
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Spec Path",
+      "type": "string"
+    },
+    "specimen_id": {
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$",
+      "title": "Specimen Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "specimen_id",
+    "spec_path",
+    "spec_hash",
+    "source_audio",
+    "provenance"
+  ],
+  "title": "GenerationManifest",
+  "type": "object"
+}

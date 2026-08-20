@@ -99,6 +99,14 @@ strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
+# The cabinet is not installed in the environment that type-checks, on purpose:
+# `uv sync` stays light, and CI never downloads a torch wheel. These are the
+# imports that only exist inside `.venv-cabinet`, and they are confined to the
+# function bodies that actually run inference.
+[[tool.mypy.overrides]]
+module = ["torch.*", "diffusers.*", "soundfile.*", "demucs.*", "basic_pitch.*", "huggingface_hub.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # The default selection is the hermetic unit suite: no network, no model

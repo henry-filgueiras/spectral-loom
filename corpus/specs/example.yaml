@@ -1,8 +1,9 @@
-# An example song specification for a future instrumental specimen.
+# The song specification for the first instrumental specimen.
 #
-# NOTHING HAS BEEN GENERATED FROM THIS FILE. It exists to exercise the SongSpec
-# contract and to show the shape a specimen request takes. No audio, no stems,
-# and no timeline exist for `sparse-funk-exposed-bass`.
+# Audio HAS been generated from this file; no stems and no timeline exist for
+# `sparse-funk-exposed-bass`. The generated audio is untracked and lives under
+# `corpus/generated/`, which is why editing this file changes what the next
+# generation produces: the specification's hash is part of the cache key.
 #
 # Every musical field below is a REQUEST, which is why each is named
 # `requested_*`. The generator may return 92 BPM when asked for 96, may drift
@@ -20,11 +21,15 @@ specimen_id: sparse-funk-exposed-bass
 
 generator:
   adapter: ace-step
-  model_id: ACE-Step/ACE-Step-v1.5
-  # Deliberately null: the revision is not resolved yet. A null revision must
-  # block generation rather than silently resolve to whatever `main` is on the
-  # day it runs. Gate 1 of docs/roadmap.md replaces this with a commit sha.
-  revision: null
+  # The diffusers-format turbo checkpoint. NOT `ACE-Step/Ace-Step1.5`, which is
+  # the same model in transformers layout and is tagged `custom_code`: loading
+  # it would mean `trust_remote_code`, which scripts/README.md forbids. See
+  # archaeology/decisions/0008 and `model-cabinet.toml`.
+  model_id: ACE-Step/acestep-v15-xl-turbo-diffusers
+  # Resolved at gate 1. Must equal what `model-cabinet.toml` pins, or generation
+  # refuses: a specification and a cabinet that disagree would produce audio
+  # attributed to a revision that did not make it.
+  revision: 200ba991ae448051e14b0183157e35c2d27c9fb0
 
 requested_prompt: >-
   Sparse instrumental funk at a relaxed walking pace. Exposed electric bass
@@ -49,14 +54,38 @@ requested_instruments:
   - clean electric guitar
 
 # Generator-specific parameters, contained here so they cannot leak into the
-# envelope. These keys are ACE-Step's vocabulary, not this project's, and they
-# are unvalidated placeholders until the adapter exists.
+# envelope. These keys are the pinned interface's vocabulary, not this project's.
+#
+# The three placeholders that used to sit here — `guidance_scale`, `scheduler`,
+# `audio_format` — were written before the adapter existed and are all wrong
+# against `diffusers.AceStepPipeline` at the pinned version:
+#
+#   guidance_scale  the turbo checkpoint is guidance-distilled; the pipeline
+#                   ignores this argument and warns. Passing it would put a
+#                   value in the cache key that changes nothing.
+#   scheduler       not a call parameter. It is a pipeline component loaded from
+#                   the checkpoint (FlowMatchEulerDiscreteScheduler).
+#   audio_format    not the generator's business. The pipeline returns tensors;
+#                   this project chooses to write WAV.
+#
+# What is left is what actually changes the result. Everything else the
+# generator is told — the prompt, the seed, the duration, and the requested BPM,
+# key, and time signature above — is passed as conditioning and recorded in the
+# generation manifest as a REQUEST.
 generator_params:
-  guidance_scale: 7.5
-  scheduler: euler
-  audio_format: wav
+  # 8 is what the turbo weights were distilled for.
+  num_inference_steps: 8
+  # Timestep-schedule shift. 3.0 is the turbo default.
+  shift: 3.0
+  # Inference precision. Materially changes the output, so it is a parameter and
+  # not a runtime detail.
+  dtype: bfloat16
 
 notes: >-
   Acceptance for gate 2 is by ear, not by metric: bass audible and separable,
   audible silence between phrases, no vocal bleed. If the result fails, record
   what failed before changing the prompt.
+
+  Nothing in this file is evidence about the audio that came back. A generation
+  manifest records what was observed of the file; what the music actually
+  contains is a question for gate 3 onward, and for a human first.

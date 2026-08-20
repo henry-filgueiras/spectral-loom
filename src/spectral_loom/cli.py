@@ -1,10 +1,18 @@
-"""The ``spectral-loom`` command line: infrastructure only.
+"""The ``spectral-loom`` command line.
 
-Three commands, none of which downloads, generates, infers, or renders anything::
+Four commands. Three of them inspect and validate; one of them runs a model::
 
-    spectral-loom doctor [--json]
+    spectral-loom doctor [--json] [--verify]
     spectral-loom validate-spec PATH [--json]
     spectral-loom validate-timeline PATH [--json]
+    spectral-loom generate PATH [--json] [--force]
+
+``generate`` is the only one that is expensive, and it is the only one that
+needs the cabinet environment. It never downloads: weights are a precondition a
+human establishes with ``scripts/bootstrap_cabinet.py``, and generation that
+quietly fetches eleven gigabytes is not a pipeline stage, it is a surprise.
+
+Nothing here infers a timeline or renders anything. Those are later gates.
 
 Exit codes are stable and are part of the interface:
 
@@ -48,7 +56,9 @@ from spectral_loom.cabinet import (
     installed_versions,
     load_repository_cabinet,
 )
-from spectral_loom.contracts import SongSpec, SongTimeline
+from spectral_loom.contracts import GenerationManifest, SongSpec, SongTimeline
+from spectral_loom.generate import GenerationError, plan
+from spectral_loom.generate import generate as run_generation
 
 EXIT_OK = 0
 EXIT_BLOCKED = 1
@@ -498,10 +508,116 @@ def _report_failure(as_json: bool, code: int, path: str, messages: list[str]) ->
             )
         )
     else:
-        print(f"{path}: invalid", file=sys.stderr)
+        print(f"{path}: {'blocked' if code == EXIT_BLOCKED else 'invalid'}", file=sys.stderr)
         for message in messages:
             print(message if message.startswith("  ") else f"  {message}", file=sys.stderr)
     return code
+
+
+# ---------------------------------------------------------------------------
+# generate
+# ---------------------------------------------------------------------------
+
+
+def generate_command(path: Path, *, as_json: bool, force: bool) -> int:
+    """Generate one specimen from one specification, and stop.
+
+    Stopping is the feature. Gate 2 of `docs/roadmap.md` is passed by a human
+    listening to the result, so this prints the file and how to hear it and does
+    not go on to separate it, analyse it, or decide it is any good.
+    """
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return _report_failure(
+            as_json, EXIT_UNREADABLE, str(path), [f"cannot read {path}: {exc.strerror or exc}"]
+        )
+
+    try:
+        document = _parse(raw.decode("utf-8"), path)
+    except (_ParseError, UnicodeDecodeError) as exc:
+        return _report_failure(as_json, EXIT_INVALID, str(path), [str(exc)])
+    if not isinstance(document, dict):
+        return _report_failure(
+            as_json,
+            EXIT_INVALID,
+            str(path),
+            [f"expected a mapping at the top level, found {type(document).__name__}"],
+        )
+    try:
+        spec = SongSpec.model_validate(document)
+    except ValidationError as exc:
+        return _report_failure(as_json, EXIT_INVALID, str(path), _format_errors(exc))
+
+    repo = _repository_root(path.resolve().parent)
+    try:
+        cabinet = load_repository_cabinet(repo)
+        prepared = plan(spec, path, raw, cabinet, repo)
+    except (CabinetError, GenerationError) as exc:
+        return _report_failure(as_json, EXIT_BLOCKED, str(path), [str(exc)])
+
+    if not as_json:
+        print(f"{path}: {prepared.specimen_id}")
+        print(f"  generator   {prepared.tool}")
+        print(f"  revision    {prepared.tool_revision}")
+        print(f"  weights     {prepared.weights_dir}")
+        print(f"  output      {prepared.output_dir}")
+        print()
+
+    try:
+        manifest, produced = run_generation(prepared, force=force)
+    except GenerationError as exc:
+        return _report_failure(as_json, EXIT_BLOCKED, str(path), [str(exc)])
+
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "path": str(path),
+                    "generated": produced,
+                    "audio": str(prepared.audio_path),
+                    "manifest": str(prepared.manifest_path),
+                    "observed": manifest.source_audio.model_dump(mode="json"),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return EXIT_OK
+
+    _print_result(prepared.audio_path, prepared.manifest_path, manifest, produced=produced)
+    return EXIT_OK
+
+
+def _print_result(
+    audio: Path, manifest_path: Path, manifest: GenerationManifest, *, produced: bool
+) -> None:
+    """Report the artifact, its observed properties, and how to hear it.
+
+    Only observations appear here. The prompt asked for a tempo and a key and an
+    exposed bass; whether any of that is in the file is a question for a human's
+    ears and later for a timeline, and printing the request next to the
+    measurements is how the two stop being distinguishable.
+    """
+    observed = manifest.source_audio
+    stage = manifest.provenance[0]
+    print("generated" if produced else "reused an existing specimen for an unchanged request")
+    print(f"  audio       {audio}")
+    print(f"  manifest    {manifest_path}")
+    print("  observed:")
+    print(f"    duration    {observed.duration_s:.2f} s")
+    print(f"    sample rate {observed.sample_rate_hz} Hz")
+    print(f"    channels    {observed.channels}")
+    print(f"    sha256      {observed.hash}")
+    print(f"  runtime     {stage.runtime}")
+    if stage.duration_ms is not None:
+        print(f"  took        {stage.duration_ms / 1000:.1f} s")
+    print()
+    print("Nothing has been inferred from this audio. Listen to it:")
+    print(f"  afplay {audio}")
+    print()
+    print("Then decide: is the bass audible and exposed? is there silence between phrases?")
+    print("are the parts separable by ear? is there vocal bleed or another generator failure?")
 
 
 # ---------------------------------------------------------------------------
@@ -548,6 +664,23 @@ def build_parser() -> argparse.ArgumentParser:
     timeline_parser.add_argument("path", type=Path)
     timeline_parser.add_argument("--json", action="store_true", help="machine-readable output")
 
+    generate_parser = subparsers.add_parser(
+        "generate",
+        help="generate one specimen from a specification using the pinned generator",
+        description=(
+            "Runs the pinned generator once and writes the audio and its manifest. Needs the "
+            "cabinet environment and the weights already on disk; it never downloads. An "
+            "unchanged request against an unchanged revision reuses the existing specimen."
+        ),
+    )
+    generate_parser.add_argument("path", type=Path)
+    generate_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    generate_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="regenerate even when an existing specimen matches this exact request",
+    )
+
     return parser
 
 
@@ -560,6 +693,8 @@ def main(argv: list[str] | None = None) -> int:
         return validate(args.path, SongSpec, "song specification", as_json=args.json)
     if args.command == "validate-timeline":
         return validate(args.path, SongTimeline, "song timeline", as_json=args.json)
+    if args.command == "generate":
+        return generate_command(args.path, as_json=args.json, force=args.force)
 
     raise AssertionError(f"unreachable: unhandled command {args.command!r}")
 

@@ -22,20 +22,30 @@ from pathlib import Path
 from typing import Any
 
 from spectral_loom.contracts import (
+    GENERATION_SCHEMA_ID,
+    GENERATION_SCHEMA_VERSION,
     SPEC_SCHEMA_ID,
     SPEC_SCHEMA_VERSION,
     TIMELINE_SCHEMA_ID,
     TIMELINE_SCHEMA_VERSION,
+    GenerationManifest,
     SongSpec,
     SongTimeline,
 )
 
+Exported = type[SongSpec] | type[SongTimeline] | type[GenerationManifest]
+
 SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 
 #: Filename to the model it is generated from, plus the identity it declares.
-EXPORTS: dict[str, tuple[type[SongSpec] | type[SongTimeline], str, str]] = {
+EXPORTS: dict[str, tuple[Exported, str, str]] = {
     "song-spec.schema.json": (SongSpec, SPEC_SCHEMA_ID, SPEC_SCHEMA_VERSION),
     "song-timeline.schema.json": (SongTimeline, TIMELINE_SCHEMA_ID, TIMELINE_SCHEMA_VERSION),
+    "generation-manifest.schema.json": (
+        GenerationManifest,
+        GENERATION_SCHEMA_ID,
+        GENERATION_SCHEMA_VERSION,
+    ),
 }
 
 
@@ -44,9 +54,7 @@ def schemas_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "schemas"
 
 
-def build(
-    model: type[SongSpec] | type[SongTimeline], schema_id: str, version: str
-) -> dict[str, Any]:
+def build(model: Exported, schema_id: str, version: str) -> dict[str, Any]:
     """Build one JSON Schema document, stamped with its dialect and identity."""
     schema: dict[str, Any] = {
         "$schema": SCHEMA_DIALECT,

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from spectral_loom.cabinet import CABINET_FILENAME
 from spectral_loom.cli import (
@@ -25,6 +26,7 @@ from spectral_loom.cli import (
     collect_checks,
     main,
 )
+from spectral_loom.contracts import SongSpec
 from tests.test_contracts import VALID_SPEC, minimal_timeline
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -218,7 +220,34 @@ def test_committed_example_specification_validates(capsys: pytest.CaptureFixture
     out = capsys.readouterr().out
     assert "valid song specification" in out
     assert "requested, not observed" in out
-    assert "UNPINNED" in out, "an unresolved generator revision must be visible, not silent"
+    assert "UNPINNED" not in out, "the example was pinned at gate 1"
+
+
+def test_the_example_specification_agrees_with_the_cabinet() -> None:
+    """The two places a revision is written must not drift apart.
+
+    They are both tracked, they are edited in different rounds, and a
+    specification pinned to a revision the cabinet no longer stocks generates
+    nothing while looking perfectly valid.
+    """
+    from spectral_loom.cabinet import load_repository_cabinet
+
+    spec = SongSpec.model_validate(
+        yaml.safe_load((REPO_ROOT / "corpus" / "specs" / "example.yaml").read_text())
+    )
+    cabinet = load_repository_cabinet(REPO_ROOT)
+    _name, entry = cabinet.entry_for_adapter(spec.generator.adapter)
+    assert spec.generator.model_id == entry.assets[0].repo_id
+    assert spec.generator.revision == entry.assets[0].revision
+
+
+def test_an_unpinned_specification_still_reports_unpinned(
+    write_json: Callable[[str, Any], Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The property the example used to carry, kept where it cannot be lost."""
+    unpinned = {**VALID_SPEC, "generator": {**VALID_SPEC["generator"], "revision": None}}
+    assert main(["validate-spec", str(write_json("spec.json", unpinned))]) == EXIT_OK
+    assert "UNPINNED" in capsys.readouterr().out
 
 
 def test_valid_json_spec_validates(write_json: Callable[[str, Any], Path]) -> None:

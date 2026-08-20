@@ -1,6 +1,6 @@
 """Versioned data contracts for the Spectral Loom compiler boundary.
 
-Two documents matter, and they are deliberately small:
+Three documents matter, and they are deliberately small:
 
 ``SongSpec``
     What was *asked for*. A specification is authored before any audio exists,
@@ -13,7 +13,14 @@ Two documents matter, and they are deliberately small:
     language-neutral compiler boundary (``archaeology/decisions/0003``): every
     downstream projection reads this file, and no projection may write to it.
 
-Both carry an explicit ``schema_id`` and ``schema_version``. The version is a
+``GenerationManifest``
+    What one generator was asked and what came back. It sits beside a generated
+    audio file, which is untracked, and it is the only thing that makes that
+    file attributable to a specification and a revision. It carries observations
+    about the file and the *request* that produced it, and never the request
+    dressed up as an observation.
+
+All three carry an explicit ``schema_id`` and ``schema_version``. The version is a
 ``Literal``, on purpose: bumping it is a code change with a reviewable diff and
 a regenerated JSON Schema, rather than a string that silently drifts. Documents
 on disk outlive the code that wrote them, so a field may gain meaning additively
@@ -42,6 +49,9 @@ SPEC_SCHEMA_VERSION: Final = "0.1.0"
 
 TIMELINE_SCHEMA_ID: Final = "spectral-loom/song-timeline"
 TIMELINE_SCHEMA_VERSION: Final = "0.1.0"
+
+GENERATION_SCHEMA_ID: Final = "spectral-loom/generation-manifest"
+GENERATION_SCHEMA_VERSION: Final = "0.1.0"
 
 #: Slug-shaped stable identifier for a specimen. Stable across regeneration:
 #: it names the *intent*, while the audio hash names a particular rendering.
@@ -344,4 +354,74 @@ class SongTimeline(Contract):
                         f"track '{track.id}' event {index} cites evidence stage "
                         f"'{event.evidence.stage}', which is not in this timeline's provenance"
                     )
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Generation manifest: what a generator was asked, and what came back.
+# ---------------------------------------------------------------------------
+
+
+class GenerationManifest(Contract):
+    """The record that makes one generated audio file auditable.
+
+    Written beside the audio, which is untracked, so this is what answers the
+    seven questions in ``docs/provenance.md`` about a file nobody can regenerate
+    from memory.
+
+    The truth-layer rule does the most work here, because generation is exactly
+    where it is easiest to break. The prompt asked for 96 BPM in D minor with an
+    electric bass. **None of that appears in this document as a fact about the
+    audio.** What appears is:
+
+    - ``source_audio``: hash, duration, sample rate, channel count. Observed,
+      measurable by anyone holding the file.
+    - ``provenance``: one stage at ``truth_layer: requested``, whose
+      ``parameters`` carry the prompt, the seed, and every value handed to the
+      generator — labelled as the request they are.
+    - ``spec_hash``: the exact bytes of the specification that was read, so the
+      whole request is recoverable without being restated here in a form that
+      could be mistaken for a measurement.
+
+    Whether the audio actually contains a bass is a question for a
+    ``SongTimeline``, produced by analysing the audio. It is not answerable from
+    this document and this document does not pretend otherwise. See
+    ``archaeology/principles/0001``.
+    """
+
+    schema_id: Literal["spectral-loom/generation-manifest"] = GENERATION_SCHEMA_ID
+    schema_version: Literal["0.1.0"] = GENERATION_SCHEMA_VERSION
+
+    specimen_id: SpecimenId
+    spec_path: str = Field(
+        min_length=1,
+        max_length=512,
+        description=(
+            "Where the specification was read from. A claim about where a file was, which is "
+            "why `spec_hash` is beside it: only the hash survives the file being moved."
+        ),
+    )
+    spec_hash: ContentHash = Field(
+        description="Hash of the exact specification bytes that produced this artifact."
+    )
+
+    source_audio: SourceAudio = Field(
+        description="Observed properties of the generated file. Measured, never requested."
+    )
+
+    provenance: list[Provenance] = Field(
+        min_length=1,
+        description=(
+            "Every stage that contributed, in production order. The generating stage is "
+            "`truth_layer: requested`: it emits evidence rather than a claim about evidence, "
+            "and its parameters are what was asked for."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _check_stages(self) -> GenerationManifest:
+        stages = [p.stage for p in self.provenance]
+        duplicate = {s for s in stages if stages.count(s) > 1}
+        if duplicate:
+            raise ValueError(f"duplicate provenance stage names: {sorted(duplicate)}")
         return self
