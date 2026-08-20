@@ -12,8 +12,9 @@ music generator
     → visual projections  (4) back ends
 ```
 
-None of it is implemented yet. This document describes the shape the implementation must take and
-the invariants it may not violate.
+The first arrow is implemented: a `SongSpec` becomes generated audio and a manifest that makes it
+attributable. Nothing after it exists — no separation, no timeline, no projection. This document
+describes the shape the rest must take and the invariants none of it may violate.
 
 ## The four layers
 
@@ -118,12 +119,17 @@ Every provenance entry names its layer. See `archaeology/principles/0001`.
 
 ## Cross-language and cross-environment stages
 
-ACE-Step, Demucs, and Basic Pitch are not expected to resolve into one Python environment; see
-`archaeology/dragons/0002`, which is open precisely because that expectation is currently
-unmeasured. The architecture already tolerates the bad outcome: stages communicate through hashed
-files, so a stage may run in a separately managed pinned environment, or in another language,
-invoked as a subprocess. A stage that does so still writes the same provenance envelope and
-names the environment it actually used.
+ACE-Step, Demucs, and Basic Pitch **do** resolve into one Python 3.11 environment on Apple
+silicon. That was measured rather than predicted, and it contradicts what
+`archaeology/decisions/0005` expected; `archaeology/dragons/0002` is closed with the evidence. The
+cabinet is therefore one optional dependency group materialized into `.venv-cabinet/`, and the
+generation stage runs in-process rather than across a subprocess boundary.
+
+The hedge stays, because it is free and the situation is not permanent: stages communicate through
+hashed files, so a stage may still run in a separately managed pinned environment, or in another
+language, invoked as a subprocess. A stage that does so still writes the same provenance envelope
+and names the environment it actually used. The next model added to the cabinet is the one that
+may cost this, and nothing above has to change when it does.
 
 ## What this architecture deliberately does not have
 

@@ -17,21 +17,27 @@ the founding archaeology. No model, no audio, no inference, no pixels.
 drift check pass; the example specification validates; a synthesized timeline validates;
 malformed documents fail with errors that name the offending field.
 
-## Gate 1 — Pinned model bootstrap
+## Gate 1 — Pinned model bootstrap ✅
 
-Resolve exact revisions for ACE-Step 1.5, Demucs, and Basic Pitch. Discover whether they co-exist
-in one Python 3.11 environment on Apple silicon (`archaeology/dragons/0002` says they may not, and
-that expectation is currently unmeasured). Write the bootstrap script to the contract in
-`scripts/README.md`: pinned revisions, idempotent, verify-before-fetch, license recorded, no
-arbitrary remote code.
+Done. `model-cabinet.toml` pins all three, and the unit of pinning turned out not to be "a model
+revision": upstream versions code and weights separately, so each entry records the implementation
+that executes, the assets it loads, and the runtime whose version changes results.
 
-**Passes when:** each model has a reproducible environment recipe that has been installed and run
-once, the resolved revisions are recorded, and re-running the bootstrap downloads nothing.
+**Evidence:** all three co-exist in one Python 3.11 environment on Apple silicon — the expectation
+in `archaeology/decisions/0005` was wrong and `archaeology/dragons/0002` is closed against
+measurement. `scripts/bootstrap_cabinet.py` satisfies the `scripts/README.md` contract, and its
+second run verified 11.1 GB against upstream sha256 and downloaded nothing with every outbound
+socket raising. `scripts/smoke_cabinet.py` ran each entry once: Basic Pitch on the CoreML
+`.mlpackage`, Demucs and ACE-Step on MPS.
 
-## Gate 2 — One specimen, accepted by ear
+## Gate 2 — One specimen, accepted by ear ⏳
 
 Generate a single 30–60 second instrumental specimen from `corpus/specs/example.yaml` with a
 resolved revision. Listen to it. Accept or reject it as a human.
+
+**Where it stands:** one candidate exists for `sparse-funk-exposed-bass` — 45.00 s, 48 kHz stereo,
+generated on MPS from the pinned turbo checkpoint, byte-reproducible across runs. **Nobody has
+heard it.** The gate is not passed by generating; it is passed by a human listening.
 
 **Passes when:** one specimen exists, has been listened to, and has been accepted — with the
 acceptance recorded, including what was wrong with any rejected attempts. **No corpus is generated

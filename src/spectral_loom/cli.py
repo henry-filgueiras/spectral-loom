@@ -53,6 +53,7 @@ from spectral_loom.cabinet import (
     check_asset,
     check_code,
     environment_site_packages,
+    find_repository_root,
     installed_versions,
     load_repository_cabinet,
 )
@@ -549,7 +550,11 @@ def generate_command(path: Path, *, as_json: bool, force: bool) -> int:
     except ValidationError as exc:
         return _report_failure(as_json, EXIT_INVALID, str(path), _format_errors(exc))
 
-    repo = _repository_root(path.resolve().parent)
+    # Anchored on the manifest rather than on `.git`, because everything this
+    # command needs — the cabinet, the weights under `models/`, the output tree —
+    # hangs off the manifest. `doctor` anchors on `.git` because it reports on a
+    # checkout; this reports on a cabinet.
+    repo = find_repository_root(path.resolve().parent)
     try:
         cabinet = load_repository_cabinet(repo)
         prepared = plan(spec, path, raw, cabinet, repo)

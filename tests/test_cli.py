@@ -20,6 +20,7 @@ import yaml
 from spectral_loom.cabinet import CABINET_FILENAME
 from spectral_loom.cli import (
     CABINET_PACKAGES_KEPT_OUT,
+    EXIT_BLOCKED,
     EXIT_INVALID,
     EXIT_OK,
     EXIT_UNREADABLE,
@@ -353,3 +354,45 @@ def test_failure_json_output_carries_the_exit_code(
     payload = json.loads(capsys.readouterr().out)
     assert payload["valid"] is False
     assert payload["exit_code"] == EXIT_UNREADABLE
+
+
+# --- generate --------------------------------------------------------------
+#
+# Only the refusals are testable here. Generation itself needs eleven gigabytes
+# and a GPU, and `decision:7` keeps both out of the default suite.
+
+
+def test_generate_refuses_an_unpinned_specification(
+    write_json: Callable[[str, Any], Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Blocked, not invalid: the document is fine, the world is not ready."""
+    unpinned = {**VALID_SPEC, "generator": {**VALID_SPEC["generator"], "revision": None}}
+    path = write_json("spec.json", unpinned)
+    (path.parent / CABINET_FILENAME).write_text(
+        (REPO_ROOT / CABINET_FILENAME).read_text(), encoding="utf-8"
+    )
+    assert main(["generate", str(path)]) == EXIT_BLOCKED
+    err = capsys.readouterr().err
+    assert "blocked" in err
+    assert "revision is null" in err
+
+
+def test_generate_reports_an_unreadable_specification(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["generate", str(tmp_path / "absent.yaml")]) == EXIT_UNREADABLE
+
+
+def test_generate_anchors_on_the_cabinet_not_on_git(
+    write_json: Callable[[str, Any], Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A specification outside any checkout still finds the cabinet beside it.
+
+    `doctor` anchors on `.git` because it reports on a checkout. `generate`
+    anchors on `model-cabinet.toml` because everything it needs — the pinned
+    identities, the weights, the output tree — hangs off the manifest.
+    """
+    path = write_json("spec.json", VALID_SPEC)
+    assert not (path.parent / ".git").exists()
+    assert main(["generate", str(path)]) == EXIT_BLOCKED
+    assert "cannot read" in capsys.readouterr().err, "no manifest beside it, and it says so"
