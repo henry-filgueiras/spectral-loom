@@ -1,7 +1,7 @@
 # scripts/
 
-**This directory is intentionally empty of scripts.** It exists to define a boundary, and to
-state the contract that the first script placed here must satisfy — so that it is reviewed
+**This directory holds only operational model-asset scripts.** It exists to define a boundary,
+and it states the contract every script placed here must satisfy — so that each is reviewed
 against a written standard rather than inventing its own.
 
 ## What belongs here
@@ -40,8 +40,71 @@ Every script in this directory must:
    nothing; weights are a precondition a script here establishes deliberately, and a test that
    depends on them is marked `needs_model`. See `../archaeology/decisions/0007-keep-the-test-suite-hermetic-no-network-no-model-weights.md`.
 
-## Why they do not exist yet
+## Why they did not exist at first
 
 Gate 1 of [../docs/roadmap.md](../docs/roadmap.md). Writing a bootstrap script before the
 revisions are resolved would mean pinning nothing, which is the one thing the contract above
-forbids.
+forbids. The revisions were resolved in sprint 2 and are in
+[../model-cabinet.toml](../model-cabinet.toml).
+
+## What is here now
+
+Two scripts, both human-invoked, neither reachable from a test or from CI.
+
+### `bootstrap_cabinet.py`
+
+Establishes the cabinet described by `../model-cabinet.toml`.
+
+```sh
+uv run scripts/bootstrap_cabinet.py env       # build the pinned environment
+.venv-cabinet/bin/python scripts/bootstrap_cabinet.py assets   # fetch the pinned weights
+uv run scripts/bootstrap_cabinet.py status    # report; changes nothing
+```
+
+`env` materializes the `cabinet` extra into `.venv-cabinet/` from the committed
+lockfile rather than into `.venv/`, so stocking the cabinet does not destroy the
+environment that runs `ruff` and `pytest`. `assets` needs `huggingface_hub` and
+therefore runs from that environment.
+
+Against the contract above, point by point:
+
+1. Revisions come from the manifest, whose contract rejects anything that is not
+   forty hex digits. No flag accepts a branch.
+2. and 3. Every pinned file is checked against the size and the sha256 upstream
+   published **before** the hub client is imported; an asset that verifies is
+   skipped without a network call. Partial downloads are resumed rather than
+   restarted, and files that do not match what is pinned stop the fetch instead
+   of being overwritten.
+4. License and provenance live in `../model-cabinet.toml`, which is tracked. The
+   untracked `.spectral-loom-fetched.json` beside the weights is a local receipt,
+   not the record.
+5. `trust_remote_code` appears nowhere, and every pinned repository contains no
+   `.py` at all. The one pickle in the ACE-Step repository is listed as excluded
+   and is never fetched.
+6. Everything written lands under `models/` or `.venv-cabinet/`.
+7. The decisions the script makes live in `spectral_loom.cabinet` and are tested
+   there, hermetically. The script itself is never executed by the suite.
+
+**Idempotency is demonstrated, not asserted.** `--offline` verifies and refuses
+to download, so after a successful run it must succeed and report every asset
+skipped:
+
+```sh
+.venv-cabinet/bin/python scripts/bootstrap_cabinet.py assets --offline
+```
+
+### `smoke_cabinet.py`
+
+Runs each pinned entry once against synthesized input and reports the device,
+the backend, the versions, and the shape of what came back.
+
+```sh
+.venv-cabinet/bin/python scripts/smoke_cabinet.py [entry ...] [--json]
+```
+
+It exists because "the recipe was installed and run once" is what gate 1 of
+[../docs/roadmap.md](../docs/roadmap.md) asks for, and because a backend that
+silently falls back to CPU produces output that looks perfectly fine. **A smoke
+is not an evidence gate.** It says the pinned thing executes here. It says
+nothing about whether a separation is clean or a note is right; those are gates
+3 and 5, and they are judged by listening.

@@ -55,6 +55,17 @@ cabinet = [
     # Note inference. Ships its own weights inside the distribution, which is
     # why it has no entry under `models/`.
     "basic-pitch==0.4.0",
+    # Present only because of a three-deep upstream constraint, and pinned
+    # rather than bounded so the reason stays legible:
+    #   basic-pitch 0.4.0 requires resampy<0.4.3
+    #   resampy 0.4.2 does `import pkg_resources` at import time
+    #   pkg_resources ships with setuptools and was REMOVED in setuptools 81
+    # Without this, `import basic_pitch.inference` raises ModuleNotFoundError in
+    # an environment that resolved and installed perfectly. resampy 0.4.3 fixed
+    # it by moving to importlib.resources, and basic-pitch's cap is what keeps
+    # that fix out of reach. Measured, not predicted: see
+    # archaeology/sprints/0002-*/0006-*.
+    "setuptools==80.9.0",
 ]
 
 [tool.uv]
