@@ -38,6 +38,16 @@ import yaml
 from pydantic import BaseModel, ValidationError
 
 from spectral_loom import __version__
+from spectral_loom.cabinet import (
+    CABINET_FILENAME,
+    AssetStatus,
+    CabinetError,
+    check_asset,
+    check_code,
+    environment_site_packages,
+    installed_versions,
+    load_repository_cabinet,
+)
 from spectral_loom.contracts import SongSpec, SongTimeline
 
 EXIT_OK = 0
@@ -45,14 +55,11 @@ EXIT_BLOCKED = 1
 EXIT_INVALID = 2
 EXIT_UNREADABLE = 3
 
-#: Packages a future round will need. Absent is the expected state today, and
-#: `archaeology/decisions/0005` is why they are not in the default environment.
-FUTURE_MODEL_PACKAGES: tuple[tuple[str, str], ...] = (
-    ("torch", "tensor runtime for the model cabinet"),
-    ("demucs", "source separation (stage 3)"),
-    ("basic_pitch", "note inference (stage 5)"),
-    ("acestep", "music generation (stage 2)"),
-)
+#: Model packages that must NOT be in the default environment. `doctor` reports
+#: their absence as the healthy state, because `archaeology/decisions/0005` puts
+#: the cabinet in its own environment and a torch that leaked into `.venv` means
+#: something installed it there by accident.
+CABINET_PACKAGES_KEPT_OUT: tuple[str, ...] = ("torch", "diffusers", "demucs", "basic_pitch")
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +124,7 @@ def _writable(path: Path) -> tuple[bool, Path]:
     return os.access(probe, os.W_OK), probe
 
 
-def collect_checks(root: Path | None = None) -> list[Check]:
+def collect_checks(root: Path | None = None, *, verify: bool = False) -> list[Check]:
     """Gather every environment observation `doctor` reports."""
     repo = _repository_root(root or Path.cwd())
     checks: list[Check] = []
@@ -201,25 +208,153 @@ def collect_checks(root: Path | None = None) -> list[Check]:
             )
         )
 
-    for package, purpose in FUTURE_MODEL_PACKAGES:
-        present = importlib.util.find_spec(package) is not None
-        checks.append(
-            Check(
-                name=f"model-dep:{package}",
-                status="ok" if present else "info",
-                detail=(
-                    f"importable — {purpose}"
-                    if present
-                    else f"absent (expected at this stage) — {purpose}"
-                ),
-            )
+    leaked = [p for p in CABINET_PACKAGES_KEPT_OUT if importlib.util.find_spec(p) is not None]
+    checks.append(
+        Check(
+            name="default-env",
+            status="ok" if not leaked else "warn",
+            detail=(
+                "light: no cabinet package in the default environment, as intended"
+                if not leaked
+                else f"{', '.join(leaked)} importable here; the cabinet belongs in its own "
+                "environment (decision 5)"
+            ),
         )
+    )
 
+    checks.extend(collect_cabinet_checks(repo, verify=verify))
     return checks
 
 
-def doctor(as_json: bool, root: Path | None = None) -> int:
-    checks = collect_checks(root)
+# ---------------------------------------------------------------------------
+# doctor: the model cabinet
+# ---------------------------------------------------------------------------
+
+
+def collect_cabinet_checks(repo: Path, *, verify: bool = False) -> list[Check]:
+    """Report the cabinet without stocking it.
+
+    Three questions that are easy to conflate and are answered separately here:
+    is this entry *pinned*, is its *implementation installed*, and are its
+    *weights on disk*. A cabinet can be fully pinned and entirely empty, which is
+    the state of a fresh clone and is not a problem with the clone.
+
+    Nothing in here downloads, writes, or imports a model. `doctor` observes.
+    """
+    checks: list[Check] = []
+    try:
+        cabinet = load_repository_cabinet(repo)
+    except CabinetError as exc:
+        return [
+            Check(
+                name="cabinet",
+                status="fail",
+                detail=f"{exc}",
+            )
+        ]
+
+    checks.append(
+        Check(
+            name="cabinet",
+            status="ok",
+            detail=(
+                f"{repo / CABINET_FILENAME}: {len(cabinet.entry)} entries pinned "
+                f"({', '.join(sorted(cabinet.entry))})"
+            ),
+        )
+    )
+
+    site_packages = environment_site_packages(repo, cabinet)
+    installed = installed_versions(site_packages)
+    environment_path = repo / cabinet.runtime.environment_path
+    checks.append(
+        Check(
+            name="cabinet-env",
+            status="ok" if installed else "info",
+            detail=(
+                f"{environment_path}: {len(installed)} distributions"
+                if installed
+                else (
+                    f"{environment_path} not built — "
+                    f"`uv run scripts/bootstrap_cabinet.py env` creates it from the lockfile"
+                )
+            ),
+        )
+    )
+
+    for name, entry in sorted(cabinet.entry.items()):
+        code = check_code(cabinet, installed, entry)
+        if not code.present:
+            status, detail = (
+                "info",
+                (f"{code.distribution}=={code.pinned_version} pinned, not installed"),
+            )
+        elif code.matches:
+            status, detail = (
+                "ok",
+                (f"{code.distribution}=={code.installed_version} installed as pinned"),
+            )
+        else:
+            status, detail = (
+                "fail",
+                (
+                    f"{code.distribution}=={code.installed_version} installed, but "
+                    f"{code.pinned_version} is pinned; the environment does not match the manifest"
+                ),
+            )
+        checks.append(Check(name=f"cabinet-code:{name}", status=status, detail=detail))
+
+        if not entry.assets:
+            bundled = entry.code.bundled_weights
+            checks.append(
+                Check(
+                    name=f"cabinet-assets:{name}",
+                    status="ok",
+                    detail=(
+                        f"none to fetch — weights ship inside {entry.code.distribution} at "
+                        f"{bundled}"
+                        if bundled
+                        else "none to fetch"
+                    ),
+                )
+            )
+            continue
+
+        for asset in entry.assets:
+            report = check_asset(repo, name, asset, verify_hashes=verify)
+            status = {
+                AssetStatus.VERIFIED: "ok",
+                AssetStatus.PRESENT: "ok",
+                AssetStatus.ABSENT: "info",
+                AssetStatus.INCOMPLETE: "warn",
+                AssetStatus.CORRUPT: "fail",
+            }[report.status]
+            checks.append(
+                Check(
+                    name=f"cabinet-assets:{name}",
+                    status=status,
+                    detail=(
+                        f"{asset.repo_id}@{asset.revision[:12]} [{asset.license}] "
+                        f"{report.status}: {report.summary()}"
+                    ),
+                )
+            )
+
+    checks.append(
+        Check(
+            name="accelerator",
+            status="info",
+            detail=(
+                f"manifest records '{cabinet.runtime.accelerator}' with torch "
+                f"{cabinet.runtime.torch}; not measured here — `doctor` does not import torch"
+            ),
+        )
+    )
+    return checks
+
+
+def doctor(as_json: bool, root: Path | None = None, *, verify: bool = False) -> int:
+    checks = collect_checks(root, verify=verify)
     blocked = [c for c in checks if c.status == "fail"]
 
     if as_json:
@@ -389,9 +524,17 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     doctor_parser = subparsers.add_parser(
-        "doctor", help="report local prerequisites; changes nothing and downloads nothing"
+        "doctor", help="report local prerequisites and cabinet state; changes nothing"
     )
     doctor_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    doctor_parser.add_argument(
+        "--verify",
+        action="store_true",
+        help=(
+            "hash every pinned model file rather than checking its size. Slow — it reads the "
+            "whole cabinet — and still downloads nothing."
+        ),
+    )
 
     spec_parser = subparsers.add_parser(
         "validate-spec", help="validate a song specification against the SongSpec contract"
@@ -412,7 +555,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.command == "doctor":
-        return doctor(as_json=args.json)
+        return doctor(as_json=args.json, verify=args.verify)
     if args.command == "validate-spec":
         return validate(args.path, SongSpec, "song specification", as_json=args.json)
     if args.command == "validate-timeline":
