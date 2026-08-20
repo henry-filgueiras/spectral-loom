@@ -113,3 +113,52 @@ silently falls back to CPU produces output that looks perfectly fine. **A smoke
 is not an evidence gate.** It says the pinned thing executes here. It says
 nothing about whether a separation is clean or a note is right; those are gates
 3 and 5, and they are judged by listening.
+
+### `check_cabinet_remote.py`
+
+Asks whether every pinned artifact is still resolvable upstream. **Metadata only:
+no weight is downloaded, no model is loaded, nothing on disk is touched.**
+
+```sh
+uv run scripts/check_cabinet_remote.py [--json] [--timeout SECONDS]
+```
+
+It exists because a pin establishes *identity*, not *availability*.
+`../model-cabinet.toml` says exactly which bytes this project means by "Demucs";
+it cannot make anyone keep serving them. The failure it catches is the quiet
+one — a repository goes private, a version is deleted from an index — and the
+cost of catching it late is a clean clone that cannot be bootstrapped.
+
+This is the **only** script here that reaches the network as its purpose, and it
+runs from the default environment on stdlib and `urllib`. It has its own
+scheduled workflow, `.github/workflows/cabinet-availability.yml`, deliberately
+separate from the hermetic PR CI so that nobody has to wonder which rules apply
+to which file.
+
+**A provider's silence is not a death certificate**, and the verdicts are shaped
+around what the hosts actually say. Measured while the script was written:
+
+- the Hugging Face hub answers a request for a repository that does not exist
+  with `401 Invalid username or password` — the *same* answer it gives for a
+  private repository you cannot see. It is refusing to distinguish "gone" from
+  "not yours", so the script reports `authentication-required` and refuses too;
+- a bad *revision* of a repository that does exist answers `404`, which is a
+  genuinely different fact and gets a different verdict;
+- PyPI answers `404` for an unknown distribution and for an unknown version of a
+  known one alike, so the two are separated by asking twice.
+
+Exit codes are the scheduled job's whole interface, and the third one is the
+point: a monitor that returned "fine" because it could not reach the network
+would be worse than no monitor, and one that returned "gone" for the same reason
+would be worse still.
+
+| code | meaning |
+| --- | --- |
+| 0 | every pin resolved |
+| 1 | a pin demonstrably did not resolve |
+| 2 | a pin could not be confirmed either way |
+| 3 | the cabinet manifest is unreadable |
+
+**It repairs nothing and updates nothing.** Choosing a replacement for an
+artifact that has become unavailable is a decision with its own evidence, and it
+belongs in `../archaeology/decisions/`.

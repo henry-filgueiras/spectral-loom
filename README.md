@@ -80,6 +80,17 @@ Stocking it is deliberate, human-invoked, and downloads about 11.2 GB:
 Re-running `assets` downloads nothing: every pinned file is checked against the sha256 upstream
 published before the hub client is even imported. See [scripts/README.md](scripts/README.md).
 
+A pin establishes identity, not availability, so a separate weekly job asks whether the pinned
+artifacts are still resolvable upstream — metadata only, no weights, no inference, no auto-update:
+
+```sh
+uv run scripts/check_cabinet_remote.py [--json]
+```
+
+It refuses to call an artifact deleted unless a provider actually says so, which the Hugging Face
+hub notably does not: it answers a request for a nonexistent repository and for a private one
+identically.
+
 ## CLI
 
 ```sh

@@ -1,0 +1,96 @@
+name: cabinet-availability
+
+# Deliberately NOT part of `ci.yml`, and the separation is the point.
+#
+# `ci.yml` is hermetic by policy (archaeology/decisions/0007): it downloads no
+# model, opens no socket that leaves the runner, and would fail if it did. This
+# workflow does the opposite on purpose — it exists to notice when a pinned
+# third-party artifact stops being resolvable — so it lives in its own file with
+# its own schedule and its own failure mode, where nobody has to wonder which
+# rules apply.
+#
+# A pin establishes identity, not availability. `model-cabinet.toml` says
+# exactly which bytes this project means; it cannot make anyone keep serving
+# them. Weekly is the right cadence for that: the failure it catches is slow,
+# and the cost of catching it late is a clean clone that cannot be bootstrapped.
+#
+# It reads METADATA ONLY. No weights, no inference, no writes, no auto-update.
+# Choosing a replacement for an artifact that has gone is an explicit decision
+# with its own evidence, not something a scheduled job gets to do unattended.
+
+on:
+  schedule:
+    # Mondays, 06:17 UTC. Off the hour because every cron job in the world runs
+    # on the hour and a monitor should not queue behind them.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cabinet-availability
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The default environment only. The cabinet extra is eleven gigabytes of
+      # torch and this job neither loads a model nor needs one to ask a
+      # repository whether it still exists; the sentinel is stdlib and urllib.
+      - name: Install from the committed lockfile
+        run: uv sync --locked
+
+      # Network is explicitly permitted here, unlike in `ci.yml`, where the
+      # offline environment variables are set precisely to make a stray hub call
+      # fail loudly.
+      - name: Resolve every pinned cabinet artifact
+        id: resolve
+        run: uv run scripts/check_cabinet_remote.py
+
+      # Runs whichever way the check went, so the JSON is in the log even on a
+      # failure — which is exactly when somebody will want to read it.
+      - name: Record the machine-readable result
+        if: always()
+        run: uv run scripts/check_cabinet_remote.py --json > cabinet-availability.json || true
+
+      - name: Upload the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cabinet-availability
+          path: cabinet-availability.json
+          retention-days: 90
+
+      # Exit 1 means a pin demonstrably did not resolve; exit 2 means the check
+      # could not reach a conclusion. Both fail the job, and the summary says
+      # which, because "we could not check" must never be reported as either
+      # "everything is fine" or "it is gone".
+      - name: Explain the failure
+        if: failure()
+        run: |
+          {
+            echo "## Pinned cabinet artifacts did not all resolve"
+            echo
+            echo "Read the step log above for the per-artifact verdict, or the"
+            echo '`cabinet-availability` artifact for the same thing as JSON.'
+            echo
+            echo "**Nothing has been changed.** This job downloads no weights, runs no"
+            echo "inference, and never updates \`model-cabinet.toml\`. If a pinned artifact"
+            echo "really has become unavailable, choosing a replacement is a decision that"
+            echo "belongs in \`archaeology/decisions/\` with the evidence for it."
+            echo
+            echo "An \`authentication-required\` or \`transient\` verdict is **not** a"
+            echo "statement that anything is gone. Hugging Face answers 401 both for a"
+            echo "repository that does not exist and for one you cannot see, so from"
+            echo "outside the two are indistinguishable and this check will not guess."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -112,3 +112,53 @@ def test_needs_network_marker_lifts_the_guard(tmp_path: Path) -> None:
     selected = _run_pytest(module, "-m", "needs_network")
     assert selected.returncode == 0, selected.stdout + selected.stderr
     assert "1 passed" in selected.stdout
+
+
+# ---------------------------------------------------------------------------
+# The two workflows are two different promises.
+# ---------------------------------------------------------------------------
+
+WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+
+
+def _without_comments(path: Path) -> str:
+    """A workflow's steps, without the prose explaining them.
+
+    Both files talk *about* `needs_model` and about downloading weights, at
+    length, because that is where the reasons live. Only what the runner will
+    actually execute is being asserted on here.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return "\n".join(line for line in lines if not line.lstrip().startswith("#"))
+
+
+def test_pr_ci_stays_hermetic() -> None:
+    """CI must not acquire a step that downloads a model or reaches out.
+
+    Asserted against the file rather than trusted, because the offline
+    environment variables in it are the only thing standing between a stray hub
+    call and a runner quietly pulling eleven gigabytes.
+    """
+    ci = _without_comments(WORKFLOWS / "ci.yml")
+    assert "HF_HUB_OFFLINE" in ci
+    for forbidden in (
+        "bootstrap_cabinet.py",
+        "smoke_cabinet.py",
+        "check_cabinet_remote.py",
+        "--extra cabinet",
+        "needs_model",
+        "needs_network",
+    ):
+        assert forbidden not in ci, f"hermetic CI grew a step that needs {forbidden!r}"
+
+
+def test_the_availability_sentinel_is_a_separate_scheduled_workflow() -> None:
+    """The explicitly networked check does not live in the hermetic one."""
+    sentinel = _without_comments(WORKFLOWS / "cabinet-availability.yml")
+    assert "schedule:" in sentinel
+    assert "cron:" in sentinel
+    assert "check_cabinet_remote.py" in sentinel
+    assert "contents: read" in sentinel, "a monitor mutates nothing"
+
+    for forbidden in ("bootstrap_cabinet.py", "smoke_cabinet.py", "--extra cabinet"):
+        assert forbidden not in sentinel, f"the sentinel would fetch or run a model: {forbidden!r}"
