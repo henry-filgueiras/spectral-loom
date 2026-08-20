@@ -7,11 +7,12 @@ the provenance of every producing stage attached; and a projection is a back end
 record and draws from it. Prompts, seeds, and requested tempos describe what was *asked for* and
 are never presented as facts about what the audio contains.
 
-## Status: pre-alpha, one arrow of the pipeline exists
+## Status: pre-alpha, two arrows of the pipeline exist
 
-The model cabinet is pinned and stocked, and a `SongSpec` becomes generated audio with a manifest
-that makes it attributable. **Everything after that is unimplemented:** no stem has been
-separated, no timeline has been inferred, and no pixel has been rendered.
+The model cabinet is pinned and stocked, a `SongSpec` becomes generated audio with a manifest that
+makes it attributable, and audio a human has accepted becomes separated stems with a manifest of
+their own. **Everything after that is unimplemented:** no timeline has been inferred and no pixel
+has been rendered.
 
 One 45-second specimen exists for `sparse-funk-exposed-bass`, and **it has been heard.** Henry
 listened on 2026-08-20 and accepted it, so gate 2 is passed — by a human, which is the only way
@@ -19,6 +20,10 @@ that gate can be passed. The acceptance is tracked even though the audio is not:
 `corpus/reviews/sparse-funk-exposed-bass.8ff73623a29d.review.json` names the exact accepted bytes,
 the reviewer, the date, and each criterion answer. What it accepts is narrow — *these bytes are
 suitable as an experimental specimen* — and it establishes nothing about what the audio contains.
+
+Those bytes have been separated with the pinned HTDemucs snapshot, in 2.8 s on MPS. **Nobody has
+heard the stems**, so gate 3 is open, and it closes the same way gate 2 did: with a person
+listening. `./loom review-separation sparse-funk-exposed-bass` is the instrument for that.
 
 ## The pipeline this is built toward
 
@@ -209,10 +214,21 @@ engraved sheet music, generalized DAW functionality, a large UI, and cloud infra
 
 ## Next experiment
 
-Gate 3 of [the roadmap](docs/roadmap.md): Demucs on the accepted specimen, with the stems listened
-to. Like gate 2 it ends with a human, not with a program.
+Gate 3 of [the roadmap](docs/roadmap.md), and like gate 2 it is not a coding task. The stems exist
+and nobody has heard them:
 
-No corpus is generated before it passes.
+```sh
+./loom review-separation sparse-funk-exposed-bass
+```
+
+The questions are printed beside the URL, per model output: is the bass line actually isolated or
+did the separation smear it, how much leakage is there, are transients damaged, is anything
+surprising in `other`, and is `vocals` effectively empty or has Demucs put an instrument in it.
+Then, for the whole separation: does the reconstruction retain the original character, and are
+these stems good enough to become evidence inputs for activity and onset inference?
+
+Nothing downstream — no timeline, no onsets, no notes, no projection, no second specimen — starts
+before that is answered. No corpus is generated before it passes.
 
 ## Project archaeology
 
