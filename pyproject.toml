@@ -24,9 +24,50 @@ spectral-loom = "spectral_loom.cli:main"
 [project.urls]
 Repository = "https://github.com/henry-filgueiras/spectral-loom"
 
-# Model integrations will arrive as optional dependency groups here, or as
-# separately managed pinned environments; see archaeology/decisions/0005.
-# Nothing heavyweight belongs in `dependencies`. No group exists yet.
+# The model cabinet. Optional on purpose: `uv sync` installs none of it, and a
+# contributor who only wants to run the tests never downloads a torch wheel.
+# See archaeology/decisions/0005 for why it is out of the default environment,
+# and `model-cabinet.toml` for what these versions actually mean — the package
+# versions here are the *implementation* identity of each cabinet entry, and the
+# weights they load are pinned separately because upstream versions them
+# separately.
+#
+# Materialize it into its own environment rather than into `.venv`, so the fast
+# feedback loop is not rebuilt every time the cabinet is stocked or unstocked:
+#
+#   scripts/bootstrap_cabinet.py env
+#
+# which is `UV_PROJECT_ENVIRONMENT=.venv-cabinet uv sync --extra cabinet` with
+# the lockfile enforced.
+[project.optional-dependencies]
+cabinet = [
+    # ACE-Step 1.5 runs through diffusers' own AceStepPipeline. The upstream
+    # ACE-Step repository is not a dependency: its Hugging Face checkpoints are
+    # `custom_code` and loading them would mean `trust_remote_code`, which
+    # scripts/README.md forbids. See archaeology/decisions/0008.
+    "diffusers==0.40.0",
+    "transformers==5.15.1",
+    "torch==2.13.0",
+    "accelerate==1.14.0",
+    "soundfile==0.14.0",
+    # Source separation. Weights are pinned in `model-cabinet.toml`.
+    "demucs==4.1.0",
+    # Note inference. Ships its own weights inside the distribution, which is
+    # why it has no entry under `models/`.
+    "basic-pitch==0.4.0",
+]
+
+[tool.uv]
+# The cabinet does not resolve for every platform, and pretending otherwise
+# would produce a lockfile that cannot be written at all. demucs 4.1.0 caps
+# torch below 2.3 on Intel macOS, which no other cabinet entry tolerates, so
+# `darwin/x86_64` is excluded rather than silently unsatisfiable. Apple silicon
+# is the host this project targets and Linux is what CI runs.
+# See archaeology/decisions/0009.
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
 
 [dependency-groups]
 dev = [

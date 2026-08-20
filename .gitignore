@@ -52,8 +52,11 @@ benchmarks/results/
 .claude/settings.local.json
 .claude/settings.local.json.displaced-by-witnessglass.*
 
-# Python environments and build output.
+# Python environments and build output. `.venv-cabinet/` is the pinned model
+# environment that scripts/bootstrap_cabinet.py builds; it is several gigabytes
+# of torch and is rebuilt from the committed lockfile, never committed.
 .venv/
+.venv-*/
 venv/
 __pycache__/
 *.py[cod]

@@ -1,0 +1,221 @@
+# The model cabinet: what this project means by "ACE-Step", "Demucs", and
+# "Basic Pitch" at this point in its history.
+#
+# This file is tracked and the weights are not, so from a clean clone this is
+# the *only* surviving record of which code and which bytes produced any result
+# in this repository. `scripts/README.md` requires that record; this is it.
+#
+# THE UNIT OF PINNING IS NOT "A MODEL REVISION". Each entry below has as many
+# identities as upstream gives it, because upstream versions them separately and
+# flattening them would invent a revision that does not exist:
+#
+#   [code]     the implementation that actually executes. For every entry here
+#              that is a released Python distribution, identified by version and
+#              by the sha256 PyPI publishes for the exact artifact.
+#   [[assets]] downloadable weights, identified by an immutable repository
+#              revision and by the sha256 upstream publishes per file. An entry
+#              may have none: Basic Pitch ships its weights inside its wheel, so
+#              its code identity IS its weight identity.
+#   [runtime]  the versions whose behaviour materially changes inference. Torch
+#              is not an implementation detail of a torch model.
+#
+# Nothing here is a branch or a bare tag. A tag that moves after a result was
+# recorded invalidates that result with no diff anywhere.
+#
+# Establish the cabinet locally with:
+#
+#   uv run scripts/bootstrap_cabinet.py env       # the pinned environment
+#   uv run scripts/bootstrap_cabinet.py assets    # the pinned weights
+#
+# Inspect it, without changing or downloading anything, with:
+#
+#   uv run spectral-loom doctor
+#
+# Measured facts about this cabinet on Apple silicon are in
+# archaeology/sprints/0002-*/0006-*, and the choices are decisions 8 and 9.
+
+schema_version = "1"
+
+
+# ---------------------------------------------------------------------------
+# Runtime shared by every entry.
+# ---------------------------------------------------------------------------
+
+[runtime]
+python = "3.11"
+# The cabinet is an optional extra of this project, so its full transitive
+# resolution — every version, every wheel hash — is in the committed `uv.lock`
+# and is not restated here. This names the extra; `uv.lock` is the lock.
+uv_extra = "cabinet"
+environment_path = ".venv-cabinet"
+# Torch's version is part of every torch entry's identity, not a detail of the
+# environment: the same weights under a different torch are a different result.
+torch = "2.13.0"
+# Measured on Apple silicon, macOS 26.4.1, torch 2.13.0. Recorded because a
+# backend that silently falls back is the failure this row exists to catch.
+# See archaeology/sprints/0002-*/0008-*.
+accelerator = "mps"
+
+
+# ---------------------------------------------------------------------------
+# ACE-Step 1.5 — music generation (roadmap gate 2).
+# ---------------------------------------------------------------------------
+
+[entry.ace-step]
+purpose = "music generation"
+adapter = "ace-step"
+upstream = "https://github.com/ace-step/ACE-Step-1.5"
+reference = "https://arxiv.org/abs/2602.00744"
+notes = """
+The implementation is diffusers' own AceStepPipeline, contributed upstream by
+the ACE-Step team, and NOT the acestep package from the ACE-Step repository.
+That is a deliberate rejection, not a convenience: every ACE-Step 1.5 checkpoint
+in transformers layout is tagged `custom_code` and carries
+`modeling_acestep_v15_turbo.py`, so loading one means `trust_remote_code=True`,
+which scripts/README.md forbids without a written reviewed decision. The
+diffusers-format repositories carry no `.py` at all. See decision 8.
+
+The pipeline wraps the DiT half of ACE-Step 1.5. The LM planner
+(`acestep-5Hz-lm-*`) is a separate model and is not in this cabinet: nothing in
+this project asks a language model to write a song blueprint, and a planner that
+rewrites the prompt would put an unrecorded inference between the request and
+the audio.
+"""
+
+[entry.ace-step.code]
+kind = "pypi"
+distribution = "diffusers"
+version = "0.40.0"
+symbol = "diffusers.AceStepPipeline"
+license = "Apache-2.0"
+# sha256 published by PyPI for the exact artifact installed.
+sha256 = "5b5da7c3ddb62152fa4afc577f02e050af688c797375c34fb2d01006da3f3541"
+artifact = "diffusers-0.40.0-py3-none-any.whl"
+
+[[entry.ace-step.assets]]
+kind = "huggingface-repo"
+repo_id = "ACE-Step/acestep-v15-xl-turbo-diffusers"
+revision = "200ba991ae448051e14b0183157e35c2d27c9fb0"
+license = "MIT"
+# The guidance-distilled "turbo" variant: 8 steps, no classifier-free guidance.
+# It is the only ACE-Step 1.5 checkpoint published in diffusers layout at the
+# quality tier this project wants, which is why it is the one pinned.
+variant = "xl-turbo"
+total_bytes = 11101507113
+# Downloaded but never loaded by this project: a torch pickle, and the
+# `silence_latent` the pipeline actually uses is a registered buffer inside
+# `condition_encoder/diffusion_pytorch_model.safetensors`. Excluded rather than
+# fetched-and-ignored, so that no pickle from a model host ever lands under
+# `models/` in this repository.
+excluded = ["silence_latent.pt"]
+files = [
+  { path = ".gitattributes", size = 1644 },
+  { path = "README.md", size = 3579 },
+  { path = "condition_encoder/config.json", size = 502 },
+  { path = "condition_encoder/diffusion_pytorch_model.safetensors", size = 1218676312, sha256 = "ca111ca95858c8d3c3678c986dda03df20778c0de009f57109c1052866d522b2" },
+  { path = "model_index.json", size = 491 },
+  { path = "scheduler/scheduler_config.json", size = 484 },
+  { path = "text_encoder/config.json", size = 1354 },
+  { path = "text_encoder/model.safetensors", size = 1191586416, sha256 = "0437e45c94563b09e13cb7a64478fc406947a93cb34a7e05870fc8dcd48e23fd" },
+  { path = "tokenizer/added_tokens.json", size = 707 },
+  { path = "tokenizer/chat_template.jinja", size = 4116 },
+  { path = "tokenizer/merges.txt", size = 1671853 },
+  { path = "tokenizer/special_tokens_map.json", size = 613 },
+  { path = "tokenizer/tokenizer.json", size = 11423705, sha256 = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a" },
+  { path = "tokenizer/tokenizer_config.json", size = 5404 },
+  { path = "tokenizer/vocab.json", size = 2776833 },
+  { path = "transformer/config.json", size = 1303 },
+  { path = "transformer/diffusion_pytorch_model-00001-of-00002.safetensors", size = 4986971904, sha256 = "814723a63ba0b11dc4a7e8a5d43b8107c947fcdb5ab1e30c65469252272b35d7" },
+  { path = "transformer/diffusion_pytorch_model-00002-of-00002.safetensors", size = 3350889672, sha256 = "38ab6a8443be10b3c4bb0b784a5b78d471358d1b4982c139cb7893c455670b67" },
+  { path = "transformer/diffusion_pytorch_model.safetensors.index.json", size = 58395 },
+  { path = "vae/config.json", size = 438 },
+  { path = "vae/diffusion_pytorch_model.safetensors", size = 337431388, sha256 = "da17edb604c40deaf09e9b24974e590d1ca83a374070e5d0884cfa4bed9a99b0" },
+]
+
+
+# ---------------------------------------------------------------------------
+# Demucs — source separation (roadmap gate 3).
+# ---------------------------------------------------------------------------
+
+[entry.demucs]
+purpose = "source separation"
+adapter = "demucs"
+upstream = "https://github.com/adefossez/demucs"
+reference = "https://arxiv.org/abs/2211.08553"
+notes = """
+`demucs.pretrained.get_model('htdemucs')` resolves the weights repository at
+whatever `main` points to today, because it calls `hf_hub_download` without a
+revision. It is therefore not usable by this project as-is: it would produce a
+result nobody could attribute to a revision. The adapter loads the pinned
+snapshot directly through `demucs.hf.load_safetensors_model` and
+`demucs.apply.BagOfModels`, which is what `get_hf_model` does anyway, minus the
+unpinned download. Recorded because it is a real constraint upstream imposes and
+not a preference. See archaeology/sprints/0002-*/0008-*.
+
+`htdemucs` is a bag of exactly one model, signature `955717e8`, per
+`htdemucs.yaml` in both the package and the weights repository.
+"""
+
+[entry.demucs.code]
+kind = "pypi"
+distribution = "demucs"
+version = "4.1.0"
+symbol = "demucs.hf.load_safetensors_model"
+license = "MIT"
+sha256 = "4916a804702033ce934a6cdfa7e38dde03f7a7a6e85f41d0120eefe9e2966758"
+artifact = "demucs-4.1.0-py3-none-any.whl"
+
+[[entry.demucs.assets]]
+kind = "huggingface-repo"
+repo_id = "adefossez/HTDemucs"
+revision = "bf35a81b663819a8255c8fefee17f9d812b786b5"
+license = "MIT"
+variant = "htdemucs"
+total_bytes = 84039727
+excluded = []
+files = [
+  { path = ".gitattributes", size = 1519 },
+  { path = "955717e8.json", size = 12087 },
+  { path = "955717e8.safetensors", size = 84025440, sha256 = "d9fa14133cfcc034a6758923bb3a8ca9f8dfd0b582134643bbf83f72c17576dd" },
+  { path = "README.md", size = 660 },
+  { path = "htdemucs.yaml", size = 21 },
+]
+
+
+# ---------------------------------------------------------------------------
+# Basic Pitch — note inference (roadmap gate 5, optional there by design).
+# ---------------------------------------------------------------------------
+
+[entry.basic-pitch]
+purpose = "note inference"
+adapter = "basic-pitch"
+upstream = "https://github.com/spotify/basic-pitch"
+reference = "https://arxiv.org/abs/2203.09893"
+notes = """
+NO DOWNLOADABLE ASSETS, and that is a fact about upstream rather than an
+omission here. basic-pitch 0.4.0 ships the ICASSP 2022 model inside its own
+distribution in four serialized forms — TensorFlow SavedModel, CoreML
+`.mlpackage`, ONNX, and TFLite — so the distribution's sha256 below is the
+complete identity of both the code and the weights. Nothing under `models/`
+belongs to this entry and `bootstrap_cabinet.py assets` has nothing to do for it.
+
+Which of the four runs is decided at import time by which backend package is
+importable, in the order TF, CoreML, TFLite, ONNX. On macOS + Python 3.11 the
+distribution's own markers install coremltools and nothing else, so the CoreML
+`.mlpackage` is what executes. That is a property of the resolved environment,
+not a choice this project makes, and it is recorded here because the selected
+serialization is part of what produced any note.
+"""
+
+[entry.basic-pitch.code]
+kind = "pypi"
+distribution = "basic-pitch"
+version = "0.4.0"
+symbol = "basic_pitch.inference.predict"
+license = "Apache-2.0"
+sha256 = "738adb503aae7fdfc7d1e1511aa0ce35052315f260a19531ef4c356708425db0"
+artifact = "basic_pitch-0.4.0-py2.py3-none-any.whl"
+# The bundled weights, named so the record does not depend on remembering that
+# a wheel contains them.
+bundled_weights = "basic_pitch/saved_models/icassp_2022"
+bundled_weights_backend = "coreml"
