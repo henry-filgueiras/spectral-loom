@@ -607,3 +607,32 @@ def test_a_selection_in_progress_looks_different_from_a_committed_loop(
     assert "dragsel" in page
     assert "letting go is visibly the thing that commits it" in page
     assert "selecting ${Math.abs(drag.to - drag.from).toFixed(2)} s" in page
+
+
+def test_fit_fits_the_loop_and_the_whole_file_is_its_own_action(tmp_path: Path) -> None:
+    """Zooming out to the whole song is rarely what "fit" was wanted for."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "function loopFitBounds()" in page
+    assert "function fitWholeFile()" in page
+    assert "if (fit) setView(fit.a, fit.b); else setView(0, duration);" in page
+
+
+def test_the_loop_extent_is_a_detent_in_both_zoom_directions(tmp_path: Path) -> None:
+    page = render(exhibit_for(tmp_path)[0])
+    assert "before the view becomes a microscope on the way in" in page
+    assert "crossingIn" in page and "crossingOut" in page
+
+
+def test_the_detent_tolerates_landing_near_it_and_cannot_stick(tmp_path: Path) -> None:
+    """A strict crossing test leaves a press that travels three percent."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert '"near enough" counts' in page
+    assert "It cannot stick" in page
+
+
+def test_the_overlay_is_clipped(tmp_path: Path) -> None:
+    """Zoomed inside a loop, the loop's own box sits at a negative offset and
+    would otherwise paint across the label column."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "#overlay { z-index: 3; overflow: hidden; }" in page
+    assert "run out across the" in page

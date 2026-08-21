@@ -95,7 +95,10 @@ input[type=range] { vertical-align: middle; accent-color: var(--hypo); }
 #overlay, #hit {
   position: absolute; top: 0; bottom: 0; left: var(--labels); right: 0; pointer-events: none;
 }
-#overlay { z-index: 3; }
+/* Clipped, because when the view is zoomed inside the loop the loop's own box
+   is positioned at a negative offset and would otherwise run out across the
+   label column on the left, and past the right edge. */
+#overlay { z-index: 3; overflow: hidden; }
 #hit { z-index: 4; pointer-events: auto; cursor: crosshair; }
 #playhead {
   position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent);
@@ -168,7 +171,8 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
     <button id="prevCandidate">&#8592; declined</button>
     <button id="nextCandidate">declined &#8594;</button>
     <span class="sep"></span>
-    <button id="fit">fit</button>
+    <button id="fit" title="fit the loop, or the whole file when there is none">fit</button>
+    <button id="whole" title="the whole file">whole</button>
     <button id="zoomOut">&#8722;</button>
     <button id="zoomIn">+</button>
     <span class="clock" id="viewinfo"></span>
@@ -210,7 +214,7 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
   <div class="keys">
     <b>space</b> play/pause · <b>0</b> source · <b>1-4</b> model output · <b>S</b> swap stem/source
     · <b>N</b>/<b>P</b> next/previous onset · <b>I</b>/<b>shift-I</b> next/previous interval ·
-    <b>enter</b> audition the selected claim · <b>[</b> <b>]</b> loop bounds · <b>F</b> fit ·
+    <b>enter</b> audition the selected claim · <b>[</b> <b>]</b> loop bounds · <b>F</b> fit the loop · <b>shift-F</b> whole file ·
     <b>-</b>/<b>=</b> zoom · <b>&larr;</b> <b>&rarr;</b> seek 5 s · <b>esc</b> clear
   </div>
   <p id="hypobanner"></p>
@@ -424,11 +428,39 @@ function setView(a, b) {
   view.b = Math.min(duration, view.a + span);
   redraw();
 }
-function fitView() { setView(0, duration); }
+/* The extent a loop wants to be seen at: itself, plus enough margin to show
+   what it is surrounded by. Distinct from the wider window an audition opens,
+   which deliberately shows more context than this. */
+function loopFitBounds() {
+  if (!looping()) return null;
+  const pad = Math.max(0.15, (loop.b - loop.a) * 0.2);
+  return { a: Math.max(0, loop.a - pad), b: Math.min(duration, loop.b + pad) };
+}
+function fitView() {
+  const fit = loopFitBounds();
+  if (fit) setView(fit.a, fit.b); else setView(0, duration);
+}
+function fitWholeFile() { setView(0, duration); }
+
 function zoom(factor) {
+  const span = view.b - view.a;
+  const next = span * factor;
+  const fit = loopFitBounds();
+  if (fit) {
+    // A detent at the loop's own extent, in both directions: the last stop
+    // before the view becomes a microscope on the way in, and the first thing
+    // it settles on coming back out. One more press goes past it.
+    // With a strict crossing test a step can land just short of the detent and
+    // then take a second press to travel three percent, so "near enough" counts
+    // as arriving. It cannot stick: once the view *is* the detent, the next
+    // press is neither crossing nor near, and goes past.
+    const fitSpan = fit.b - fit.a;
+    const crossingIn = factor < 1 && span > fitSpan && next < fitSpan * 1.2;
+    const crossingOut = factor > 1 && span < fitSpan && next > fitSpan * 0.8;
+    if (crossingIn || crossingOut) { setView(fit.a, fit.b); return; }
+  }
   const centre = Math.max(view.a, Math.min(position(), view.b));
-  const span = (view.b - view.a) * factor;
-  setView(centre - span / 2, centre + span / 2);
+  setView(centre - next / 2, centre + next / 2);
 }
 function xOf(t, w) { return ((t - view.a) / (view.b - view.a)) * w; }
 function tOf(x, w) { return view.a + (x / w) * (view.b - view.a); }
@@ -1305,6 +1337,7 @@ function selectTrack(id) {
 document.getElementById('play').onclick = toggle;
 document.getElementById('stop').onclick = () => { pause(); offset = 0; draw(); };
 document.getElementById('fit').onclick = fitView;
+document.getElementById('whole').onclick = fitWholeFile;
 document.getElementById('zoomIn').onclick = () => zoom(0.5);
 document.getElementById('zoomOut').onclick = () => zoom(2);
 document.getElementById('listen').onclick = swapListening;
@@ -1489,7 +1522,8 @@ window.addEventListener('keydown', e => {
   if (k === 'Enter') { audition(); return; }
   if (k === '[') { setLoopIn(); return; }
   if (k === ']') { setLoopOut(); return; }
-  if (k === 'f' || k === 'F') { fitView(); return; }
+  if (k === 'f') { fitView(); return; }
+  if (k === 'F') { fitWholeFile(); return; }
   if (k === '-' || k === '_') { zoom(2); return; }
   if (k === '=' || k === '+') { zoom(0.5); return; }
   if (k === 'ArrowLeft') { e.preventDefault(); seek(position() - 5); return; }
@@ -1500,7 +1534,7 @@ window.addEventListener('keydown', e => {
     document.getElementById('rawWrap').style.display = 'none';
     document.getElementById('inspectorBody').innerHTML =
       '<span class="hint">Click an onset marker or an interval to select it.</span>';
-    fitView(); restart();
+    fitWholeFile(); restart();
   }
 });
 /* Setting the in point starts a *new* selection rather than editing the live
