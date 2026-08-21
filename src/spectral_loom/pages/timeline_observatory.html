@@ -70,6 +70,12 @@ main { padding: 12px 18px 40px; }
   letter-spacing: .05em; color: var(--interval); }
 #markList table { width: 100%; }
 #markList td { color: var(--ink); }
+#markList input.note {
+  width: 100%; background: transparent; border: 0; border-bottom: 1px dotted var(--line);
+  color: var(--interval); font: inherit; padding: 1px 0;
+}
+#markList input.note:focus { outline: none; border-bottom-color: var(--interval); }
+#markList input.note::placeholder { color: #3d4752; }
 #markList .drop { cursor: pointer; color: var(--dim); }
 #markList .drop:hover { color: var(--warn); }
 #markText {
@@ -268,9 +274,10 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
   <div id="notebook">
     <h2>Review marks <span class="hint" id="markCount"></span></h2>
     <p class="hint">
-      <b>M</b> marks whatever is selected, or the playhead if nothing is. Marks live in this
-      browser tab and nowhere else — the page writes nothing, to the timeline or anywhere — so
-      copy them out before you close it.
+      <b>M</b> marks whatever is selected, or the playhead if nothing is, and puts the cursor in
+      that row's note so you can say what you heard without reaching for the mouse. Marks live in
+      this browser tab and nowhere else — the page writes nothing, to the timeline or anywhere —
+      so copy them out before you close it.
     </p>
     <div id="markList" class="hint">No marks yet.</div>
     <div class="row" style="margin-top:10px">
@@ -1111,6 +1118,11 @@ function addMark() {
   });
   marks.sort((a, b) => a.t - b.t || a.track.localeCompare(b.track));
   renderMarks();
+  // Straight into the note for the mark just made, so a thought can be written
+  // down while it is still the reason the mark exists.
+  const index = marks.findIndex(m => m === marks.find(x => x.t === at && x.kind === kind));
+  const field = document.querySelector(`input.note[data-note="${index}"]`);
+  if (field) { field.focus(); field.scrollIntoView({ block: 'nearest' }); }
 }
 function renderMarks() {
   document.getElementById('markCount').textContent = marks.length ? `(${marks.length})` : '';
@@ -1120,9 +1132,18 @@ function renderMarks() {
     `<tr><th>${fmt(m.t)}</th><td>${escapeHtml(m.track.split('.').pop())}</td>` +
     `<td>${escapeHtml(markLabel(m))}</td>` +
     `<td>${escapeHtml(m.numbers.join(' · '))}</td>` +
+    `<td><input class="note" data-note="${i}" placeholder="what you heard" ` +
+    `value="${escapeHtml(m.note || '')}"></td>` +
     `<td class="drop" data-drop="${i}">remove</td></tr>`).join('') + '</table>';
   list.querySelectorAll('[data-drop]').forEach(el => {
     el.onclick = () => { marks.splice(Number(el.dataset.drop), 1); renderMarks(); };
+  });
+  // Written straight onto the mark. Re-rendering the list on every keystroke
+  // would take the cursor away mid-word, which is the whole reason to type here
+  // rather than in a separate box.
+  list.querySelectorAll('input.note').forEach(el => {
+    el.oninput = () => { marks[Number(el.dataset.note)].note = el.value; };
+    el.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === 'Escape') el.blur(); };
   });
 }
 function marksAsText() {
@@ -1132,12 +1153,14 @@ function marksAsText() {
     `compiled onset floor ${compiledFloor()}`,
     `(a what-if mark records the floor it was derived at, which may differ per row)`,
     '',
-    '| time | output | what | numbers |',
-    '| --- | --- | --- | --- |',
+    '| time | output | what | note | numbers |',
+    '| --- | --- | --- | --- | --- |',
   ];
+  // A pipe inside a note would split the row it is describing.
+  const cell = s => String(s || '').replace(/\|/g, '\\|').trim();
   const rows = marks.map(m =>
     `| ${fmt(m.t)} (${m.t.toFixed(3)} s) | ${m.track.split('.').pop()} | ` +
-    `${markLabel(m)} | ${m.numbers.join(' · ')} |`);
+    `${markLabel(m)} | ${cell(m.note)} | ${m.numbers.join(' · ')} |`);
   return head.concat(rows).join('\n') + '\n';
 }
 

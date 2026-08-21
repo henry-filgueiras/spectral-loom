@@ -479,3 +479,26 @@ def test_the_clicks_ride_the_same_transport_as_the_audio(tmp_path: Path) -> None
     page = render(exhibit_for(tmp_path)[0])
     assert "just another buffer on the same clock" in page
     assert "CLICK_LANE = '__clicks__'" in page
+
+
+def test_a_mark_can_carry_a_note_and_the_note_travels_with_it(tmp_path: Path) -> None:
+    """Batching marks only helps if a row can say what was heard at it."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert 'placeholder="what you heard"' in page
+    assert "| time | output | what | note | numbers |" in page
+    # A pipe inside a note would split the row it is describing.
+    assert "replace(/\\|/g" in page
+
+
+def test_typing_a_note_does_not_fire_the_keyboard_shortcuts(tmp_path: Path) -> None:
+    """`c`, `m` and space are all letters someone will type into a note."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "if (e.target.tagName === 'INPUT') return;" in page
+
+
+def test_a_note_is_written_onto_the_mark_without_re_rendering_the_list(
+    tmp_path: Path,
+) -> None:
+    """Re-rendering per keystroke would take the cursor away mid-word."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "would take the cursor away mid-word" in page
