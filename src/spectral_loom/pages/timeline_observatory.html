@@ -999,9 +999,13 @@ function pickAt(time, kind) {
    In this browser tab and nowhere else. The page has no writer, and marking a
    claim must not become a way to acquire one: what accumulates here is a
    reviewer's own notes, and the only way out is the clipboard. */
-function markLabel(kind) {
+function markLabel(mark) {
+  // The floor is read off the mark, not off the slider. Reading it live meant a
+  // mark made at one floor was relabelled the moment the slider moved, which
+  // misattributes the one thing a what-if mark exists to record.
   return { onset: 'onset', interval: 'activity.interval', candidate: 'declined peak',
-           hypothetical: 'what-if at floor ' + currentFloor(), moment: 'moment' }[kind] || kind;
+           hypothetical: 'what-if at floor ' + mark.floor, moment: 'moment' }[mark.kind]
+         || mark.kind;
 }
 function addMark() {
   const at = selection ? selection.event.start_s : position();
@@ -1022,7 +1026,12 @@ function addMark() {
                  `margin ${(e.margin).toFixed(2)}`, `${e.frame_rms_dbfs} dBFS`);
     if (e.reason) numbers.push(e.reason);
   }
-  marks.push({ t: at, track: selectedTrack, kind, numbers, note: '' });
+  marks.push({
+    t: at, track: selectedTrack, kind, numbers, note: '',
+    // Captured now. A what-if is only interpretable against the floor it was
+    // derived at, and that floor is about to change.
+    floor: kind === 'hypothetical' ? currentFloor() : null,
+  });
   marks.sort((a, b) => a.t - b.t || a.track.localeCompare(b.track));
   renderMarks();
 }
@@ -1032,7 +1041,7 @@ function renderMarks() {
   if (!marks.length) { list.innerHTML = 'No marks yet.'; return; }
   list.innerHTML = '<table>' + marks.map((m, i) =>
     `<tr><th>${fmt(m.t)}</th><td>${escapeHtml(m.track.split('.').pop())}</td>` +
-    `<td>${escapeHtml(markLabel(m.kind))}</td>` +
+    `<td>${escapeHtml(markLabel(m))}</td>` +
     `<td>${escapeHtml(m.numbers.join(' · '))}</td>` +
     `<td class="drop" data-drop="${i}">remove</td></tr>`).join('') + '</table>';
   list.querySelectorAll('[data-drop]').forEach(el => {
@@ -1044,13 +1053,14 @@ function marksAsText() {
     `# Review marks — ${EXHIBIT.specimen_id}`,
     `timeline sha256 ${novelty ? novelty.timeline_sha256 : '(unknown)'}`,
     `compiled onset floor ${compiledFloor()}`,
+    `(a what-if mark records the floor it was derived at, which may differ per row)`,
     '',
     '| time | output | what | numbers |',
     '| --- | --- | --- | --- |',
   ];
   const rows = marks.map(m =>
     `| ${fmt(m.t)} (${m.t.toFixed(3)} s) | ${m.track.split('.').pop()} | ` +
-    `${markLabel(m.kind)} | ${m.numbers.join(' · ')} |`);
+    `${markLabel(m)} | ${m.numbers.join(' · ')} |`);
   return head.concat(rows).join('\n') + '\n';
 }
 
