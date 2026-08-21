@@ -189,8 +189,16 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
     <label class="opt">hypothetical onset floor
       <input type="range" id="floor" min="0" max="60" step="0.5" style="width:220px">
       <input type="number" id="floorValue" step="0.5" min="0"></label>
+    <span class="sep"></span>
+    <label class="opt">multiplier
+      <input type="range" id="multiplier" min="0" max="4" step="0.05" style="width:150px">
+      <input type="number" id="multiplierValue" step="0.05" min="0"></label>
     <button id="floorReset">reset to compiled</button>
     <span class="clock" id="floorInfo"></span>
+  </div>
+  <div class="row">
+    <label class="opt"><input type="checkbox" id="follow" checked> follow the playhead when
+      zoomed in</label>
   </div>
   <div class="keys">
     <b>space</b> play/pause · <b>0</b> source · <b>1-4</b> model output · <b>S</b> swap stem/source
@@ -497,21 +505,32 @@ function checkOverlayAgainstDocument() {
    checked: at the compiled floor this must reproduce the compiler's own list
    exactly, and the banner says so when it does not. */
 function compiledFloor() { return novelty ? novelty.flux_floor : EXHIBIT.flux_floor; }
+function compiledMultiplier() { return novelty ? novelty.parameters.median_multiplier : 2; }
 function currentFloor() { return Number(document.getElementById('floor').value); }
-function floorIsCompiled() { return Math.abs(currentFloor() - compiledFloor()) < 1e-9; }
+function currentMultiplier() { return Number(document.getElementById('multiplier').value); }
+function ruleIsCompiled() {
+  return Math.abs(currentFloor() - compiledFloor()) < 1e-9
+      && Math.abs(currentMultiplier() - compiledMultiplier()) < 1e-9;
+}
 
-function acceptAtFloor(nov, floor) {
+/* The adaptive term shipped with each peak is `compiled multiplier x local
+   median`, so another multiplier is that same term scaled. Both halves of the
+   rule are therefore reachable from what the compiler already computed, and
+   neither the novelty, the running median nor the peak picking is re-derived
+   here. */
+function acceptAt(nov, floor, multiplier) {
+  const scale = multiplier / compiledMultiplier();
   const out = [];
   let last = -Infinity;
   for (let i = 0; i < nov.peak_t.length; i++) {
     const t = nov.peak_t[i], flux = nov.peak_flux[i];
-    if (flux < nov.peak_adaptive[i] + floor) continue;
+    const adaptive = nov.peak_adaptive[i] * scale;
+    if (flux < adaptive + floor) continue;
     if (t - last < novelty.min_gap_s) continue;
     last = t;
     out.push({
-      start_s: t, flux, threshold: nov.peak_adaptive[i] + floor,
-      margin: flux - (nov.peak_adaptive[i] + floor),
-      local_median: nov.peak_adaptive[i], frame_rms_dbfs: nov.peak_dbfs[i], index: i,
+      start_s: t, flux, threshold: adaptive + floor, margin: flux - (adaptive + floor),
+      local_median: adaptive, frame_rms_dbfs: nov.peak_dbfs[i], index: i,
     });
   }
   return out;
@@ -521,17 +540,18 @@ function refreshFloor() {
   const info = document.getElementById('floorInfo');
   const nov = novelty && novelty.tracks[selectedTrack];
   document.getElementById('floorValue').value = currentFloor();
+  document.getElementById('multiplierValue').value = currentMultiplier();
   if (!nov) { banner.style.display = 'none'; info.textContent = ''; return; }
 
   const previous = hypoOnsets && hypoOnsets.length;
-  hypoOnsets = floorIsCompiled() ? null : acceptAtFloor(nov, currentFloor());
+  hypoOnsets = ruleIsCompiled() ? null : acceptAt(nov, currentFloor(), currentMultiplier());
   if ((hypoOnsets && hypoOnsets.length) !== previous) refreshClicks();
 
   // The self-check: at the compiled floor the derivation must reproduce the
   // compiler's own accepted list, exactly, on every track.
   let disagreement = null;
   for (const [id, track] of Object.entries(novelty.tracks)) {
-    const mine = acceptAtFloor(track, compiledFloor()).map(o => o.start_s);
+    const mine = acceptAt(track, compiledFloor(), compiledMultiplier()).map(o => o.start_s);
     const theirs = track.accepted_t;
     if (mine.length !== theirs.length ||
         mine.some((v, k) => Math.abs(v - theirs[k]) > 1e-6)) {
@@ -551,10 +571,11 @@ function refreshFloor() {
     banner.style.display = 'block';
     banner.classList.remove('bad');
     banner.textContent =
-      'HYPOTHETICAL ONSET FLOOR ' + currentFloor() + ' — the compiled floor is ' +
-      compiledFloor() + '. Dashed purple: what this same rule would additionally accept. ' +
+      'HYPOTHETICAL RULE — flux >= ' + currentMultiplier() + ' x local median + ' +
+      currentFloor() + ', against the compiled ' + compiledMultiplier() + ' and ' +
+      compiledFloor() + '. Dashed purple: what this rule would additionally accept. ' +
       'Red cross: a claim it would lose. Neither is an event, nothing has been written, and ' +
-      'the timeline is unchanged. Verified: at ' + compiledFloor() + ' this derivation ' +
+      'the timeline is unchanged. Verified: at the compiled values this derivation ' +
       'reproduces the compiler exactly on all four outputs.';
     const compiledSet = new Set(nov.accepted_t);
     const wouldSet = new Set(hypoOnsets.map(o => o.start_s));
@@ -872,7 +893,27 @@ function draw() {
       ? 'whole file' + loopText
       : `view ${fmt(view.a)} - ${fmt(view.b)}` + loopText) + pendingText;
 }
-function frame() { draw(); requestAnimationFrame(frame); }
+/* Page the view along rather than scrolling it continuously. Every redraw
+   recomputes waveform peaks for five canvases, so following at frame rate would
+   cost far more than it is worth; jumping once per view-width, with the
+   playhead landing near the left edge, keeps what is coming into view without
+   redrawing anything that has not changed.
+
+   A loop that fits inside the view never pages, which is what makes auditioning
+   a claim and following a passage coexist. */
+function followPlayhead() {
+  if (!playing || !document.getElementById('follow').checked) return;
+  const span = view.b - view.a;
+  if (span >= duration - 0.01) return;
+  const p = position();
+  if (p < view.a || p >= view.a + span * 0.85) {
+    const wanted = Math.max(0, Math.min(p - span * 0.15, duration - span));
+    // Without this guard the clamp at the end of the file re-triggers every
+    // frame, and every trigger is five canvases.
+    if (Math.abs(wanted - view.a) > span * 0.02) setView(wanted, wanted + span);
+  }
+}
+function frame() { followPlayhead(); draw(); requestAnimationFrame(frame); }
 
 /* ---- selection and audition --------------------------------------------- */
 function describe(kind, event) {
@@ -1263,12 +1304,19 @@ document.getElementById('clicks').addEventListener('input', applyGains);
 document.getElementById('edges').addEventListener('input', refreshClicks);
 document.getElementById('clickLevel').addEventListener('input', applyGains);
 document.getElementById('floor').addEventListener('input', refreshFloor);
+document.getElementById('multiplier').addEventListener('input', refreshFloor);
 document.getElementById('floorValue').addEventListener('input', () => {
   document.getElementById('floor').value = document.getElementById('floorValue').value;
   refreshFloor();
 });
+document.getElementById('multiplierValue').addEventListener('input', () => {
+  document.getElementById('multiplier').value =
+    document.getElementById('multiplierValue').value;
+  refreshFloor();
+});
 document.getElementById('floorReset').onclick = () => {
   document.getElementById('floor').value = compiledFloor();
+  document.getElementById('multiplier').value = compiledMultiplier();
   refreshFloor();
 };
 document.getElementById('copyMarks').onclick = async () => {
@@ -1360,7 +1408,13 @@ window.addEventListener('keydown', e => {
   if (k === 'I') { step('interval', -1); return; }
   if (k === 'r') { step('candidate', +1); return; }
   if (k === 'R') { step('candidate', -1); return; }
-  if (k === 'm' || k === 'M') { addMark(); return; }
+  if (k === 'm' || k === 'M') {
+    // Without this the keydown focuses the note field and the browser's own
+    // default action then types the 'm' into it.
+    e.preventDefault();
+    addMark();
+    return;
+  }
   if (k === 'c' || k === 'C') {
     const box = document.getElementById('clicks');
     box.checked = !box.checked;
@@ -1442,6 +1496,7 @@ const status = document.getElementById('status');
   document.getElementById('hypoEnter').value = RULE.enter_dbfs;
   document.getElementById('hypoExit').value = RULE.exit_dbfs;
   document.getElementById('floor').value = novelty.flux_floor;
+  document.getElementById('multiplier').value = novelty.parameters.median_multiplier;
   document.getElementById('rasterMeta').textContent =
     timeline.tracks.map(t => `${t.id.split('.').pop()} ` +
       `${t.events.filter(e => e.type === 'onset').length}`).join(' · ');

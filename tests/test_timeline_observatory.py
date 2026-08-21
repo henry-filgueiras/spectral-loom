@@ -378,12 +378,14 @@ def test_lowering_the_floor_can_only_add_and_raising_it_can_only_remove(
     assert compiled <= accept(0.0)
 
 
-def test_the_page_carries_the_floor_control_and_says_it_is_hypothetical(
+def test_the_page_carries_the_rule_controls_and_says_they_are_hypothetical(
     tmp_path: Path,
 ) -> None:
     page = render(exhibit_for(tmp_path)[0])
     assert "hypothetical onset floor" in page
-    assert "HYPOTHETICAL ONSET FLOOR" in page
+    assert "multiplier" in page
+    # The banner names the whole rule, since either half can now be moved.
+    assert "HYPOTHETICAL RULE — flux >= " in page
     assert "nothing has been written" in page
     assert "reproduces the compiler exactly" in page
     assert "THIS PAGE DISAGREES WITH THE COMPILER at the compiled floor" in page
@@ -535,3 +537,40 @@ def test_the_selected_interval_gets_audible_boundaries(tmp_path: Path) -> None:
     assert "edge_in" in page and "edge_out" in page
     assert "spilling over from the one before it" in page
     assert "every interval edge" in page
+
+
+def test_marking_does_not_type_its_own_shortcut_into_the_note(tmp_path: Path) -> None:
+    """The keydown focuses the field, and the default action then types the 'm'."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "the browser's own\n    // default action then types the 'm' into it" in page
+
+
+def test_both_halves_of_the_onset_rule_are_reachable(tmp_path: Path) -> None:
+    """The shipped adaptive term is multiplier x median, so another multiplier
+    is that same term scaled — no re-derivation of novelty, median or peaks."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert 'id="multiplier"' in page
+    assert "scale = multiplier / compiledMultiplier()" in page
+    assert "function ruleIsCompiled()" in page
+
+
+def test_the_self_check_covers_both_parameters(tmp_path: Path) -> None:
+    page = render(exhibit_for(tmp_path)[0])
+    assert "acceptAt(track, compiledFloor(), compiledMultiplier())" in page
+    assert "THIS PAGE DISAGREES WITH THE COMPILER" in page
+
+
+def test_the_view_pages_rather_than_scrolling_continuously(tmp_path: Path) -> None:
+    """Every redraw recomputes peaks for five canvases; following at frame rate
+    would cost more than it is worth."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "function followPlayhead()" in page
+    assert "Page the view along rather than scrolling it continuously" in page
+    # and the guard against re-triggering forever at the end of the file
+    assert "re-triggers every\n    // frame" in page
+
+
+def test_an_audition_loop_inside_the_view_does_not_page(tmp_path: Path) -> None:
+    """Which is what lets auditioning a claim and following a passage coexist."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "A loop that fits inside the view never pages" in page
