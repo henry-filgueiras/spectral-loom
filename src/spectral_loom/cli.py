@@ -10,6 +10,7 @@ Four commands. Three of them inspect and validate; one of them runs a model::
     spectral-loom separate SPECIMEN [--device mps|cpu] [--json] [--force]
     spectral-loom review-separation SPECIMEN [--port N] [--no-open]
     spectral-loom accept-separation SPECIMEN --reviewer NAME --reviewed-on DATE ...
+    spectral-loom compile SPECIMEN [--json] [--force]
 
 ``generate`` and ``separate`` are expensive and need the cabinet environment.
 Neither downloads:
@@ -115,6 +116,15 @@ from spectral_loom.separate import SEPARATION_DIRNAME, SEPARATION_MANIFEST_FILEN
 from spectral_loom.separate import load_manifest as load_separation
 from spectral_loom.separate import plan as plan_separation
 from spectral_loom.separate import run as run_separation
+from spectral_loom.timeline import (
+    CompileError,
+    CompilePlan,
+    CompileReceipt,
+    cache_miss_reason,
+    compile_timeline,
+    load_receipt,
+)
+from spectral_loom.timeline import plan as plan_compile
 
 EXIT_OK = 0
 EXIT_BLOCKED = 1
@@ -1263,6 +1273,162 @@ def _print_review_checklist(sources: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# compile
+# ---------------------------------------------------------------------------
+
+
+def compile_command(
+    specimen_id: str,
+    *,
+    force: bool,
+    as_json: bool,
+    root: Path | None = None,
+) -> int:
+    """Compile one accepted separation into a `song.timeline.json`, and stop.
+
+    Stopping is the feature, again. Gate 4 is passed by a human spot-checking
+    events against audio, so this writes the document, reports what is in it
+    descriptively, and forms no opinion about whether any of it is musically
+    right. An onset count is a count of hypotheses.
+    """
+    repo = find_repository_root(root or Path.cwd())
+    try:
+        prepared = plan_compile(specimen_id, repo)
+    except CompileError as exc:
+        return _report_failure(as_json, EXIT_BLOCKED, specimen_id, [str(exc)])
+
+    miss = _cache_state(prepared)
+    if not as_json:
+        print(f"{specimen_id}")
+        print(f"  source      {prepared.relative(prepared.source_path)}")
+        print(f"  sha256      {prepared.source_hash}")
+        print(
+            f"  accepted    {prepared.manifest_hash}  (separation, by "
+            f"{prepared.separation_review.review.reviewer} on "
+            f"{prepared.separation_review.review.reviewed_on})"
+        )
+        print(f"  analyser    {prepared.tool} {prepared.tool_revision}")
+        print(f"  output      {prepared.relative(prepared.timeline_path)}")
+        print(f"  cache key   {prepared.cache_key}")
+        if miss is not None:
+            print(f"  cache miss  {miss}")
+        print()
+
+    try:
+        timeline, receipt, produced = compile_timeline(prepared, force=force)
+    except CompileError as exc:
+        return _report_failure(as_json, EXIT_BLOCKED, specimen_id, [str(exc)])
+
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "specimen_id": specimen_id,
+                    "compiled": produced,
+                    "cache_hit": not produced,
+                    "timeline": str(prepared.timeline_path),
+                    "timeline_sha256": receipt.timeline_sha256,
+                    "receipt": str(prepared.receipt_path),
+                    "event_counts": receipt.event_counts,
+                    "notices": receipt.notices,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return EXIT_OK
+
+    _print_timeline(prepared, timeline, receipt, produced=produced)
+    return EXIT_OK
+
+
+def _cache_state(prepared: CompilePlan) -> str | None:
+    """Why a previous result cannot be reused, when one exists at all.
+
+    Printed before the compile rather than after, because a run that should
+    have hit cache and did not is a bug report and the reason is the report.
+    """
+    if not prepared.receipt_path.is_file():
+        return None
+    try:
+        return cache_miss_reason(prepared, load_receipt(prepared.receipt_path))
+    except CompileError as exc:
+        return str(exc)
+
+
+def _print_timeline(
+    prepared: CompilePlan,
+    timeline: SongTimeline,
+    receipt: CompileReceipt,
+    *,
+    produced: bool,
+) -> None:
+    """Report what is in the document, and nothing about whether it is right.
+
+    Every number here is descriptive. `bass: 95 onsets` means this detector at
+    these parameters produced ninety-five onset *hypotheses* about that model
+    output; it does not mean the bass played ninety-five notes, and the wording
+    is chosen so that nobody can quote this output as though it did.
+    """
+    if produced:
+        print("compiled")
+        print(f"  took        {receipt.duration_ms / 1000:.1f} s")
+    else:
+        print(
+            "cache hit: reused a previous timeline, after re-hashing every input and the "
+            "document itself"
+        )
+        print(f"  recorded    {receipt.duration_ms / 1000:.1f} s")
+    print(f"  timeline    {prepared.relative(prepared.timeline_path)}")
+    print(f"  sha256      {receipt.timeline_sha256}")
+    print(f"  receipt     {prepared.relative(prepared.receipt_path)}")
+    print(f"  runtime     {receipt.runtime}")
+    print()
+
+    print("  tracks — the names are the separator's own output labels, not verified instruments:")
+    duration = timeline.source_audio.duration_s
+    for track in timeline.tracks:
+        samples = [e for e in track.events if e.type == "activity.sample"]
+        intervals = [e for e in track.events if e.type == "activity.interval"]
+        onsets = [e for e in track.events if e.type == "onset"]
+        covered = sum((e.end_s or e.start_s) - e.start_s for e in intervals)
+        levels = sorted(float(e.payload["rms_dbfs"]) for e in samples)  # type: ignore[arg-type]
+
+        print(f"    {track.id}")
+        print(f"      activity.sample    {len(samples):5d}")
+        if levels:
+            middle = levels[len(levels) // 2]
+            print(
+                f"        measured level   min {levels[0]:7.2f}  median {middle:7.2f}  "
+                f"max {levels[-1]:7.2f} dBFS"
+            )
+        print(
+            f"      activity.interval  {len(intervals):5d}   {covered:6.2f} s   "
+            f"{100 * covered / duration:5.1f}% of the timeline"
+        )
+        if not intervals:
+            print(
+                "        0 intervals inferred under this rule and these thresholds. That is a "
+                "statement about the detector, not about the recording."
+            )
+        print(f"      onset              {len(onsets):5d}   hypotheses from this detector")
+        if onsets:
+            strengths = sorted(float(e.payload["flux"]) for e in onsets)  # type: ignore[arg-type]
+            print(
+                f"        onset strength   min {strengths[0]:9.2f}  "
+                f"median {strengths[len(strengths) // 2]:9.2f}  max {strengths[-1]:9.2f}"
+            )
+    print()
+    for notice in receipt.notices:
+        print(f"  notice: {notice}")
+    if receipt.notices:
+        print()
+    print("Nothing here says these events are musically right. An onset count is a count of")
+    print("hypotheses this detector produced at these parameters, and no more than that.")
+    print(f"Check them against the audio:  spectral-loom review-timeline {prepared.specimen_id}")
+
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -1403,6 +1569,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     separate_parser.add_argument("--json", action="store_true", help="machine-readable output")
 
+    compile_parser = subparsers.add_parser(
+        "compile",
+        help="compile an accepted separation into a song.timeline.json",
+        description=(
+            "Reads the stems a human accepted at gate 3 and writes a versioned timeline of "
+            "activity samples, activity intervals and onset hypotheses. Runs no model and needs "
+            "no cabinet: the analysis is deterministic arithmetic and every parameter that "
+            "changes an event is in the document and in the cache key. It refuses unless both "
+            "human verdicts match the bytes on disk, and an unchanged request reuses the "
+            "previous timeline only after re-hashing every input and the document itself."
+        ),
+    )
+    compile_parser.add_argument("specimen_id", help="specimen id, e.g. sparse-funk-exposed-bass")
+    compile_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="compile again even when a verified timeline exists",
+    )
+    compile_parser.add_argument("--json", action="store_true", help="machine-readable output")
+
     accept_separation_parser = subparsers.add_parser(
         "accept-separation",
         help="record a human's verdict on one exact separation, bound to every stem hash",
@@ -1536,6 +1722,9 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
             as_json=args.json,
         )
+
+    if args.command == "compile":
+        return compile_command(args.specimen_id, force=args.force, as_json=args.json)
 
     if args.command == "accept-separation":
         try:

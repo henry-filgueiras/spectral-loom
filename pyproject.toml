@@ -16,6 +16,17 @@ dependencies = [
     # Corpus specifications are authored by hand and are therefore YAML.
     # This is the only reason PyYAML is here; nothing else parses YAML.
     "pyyaml>=6,<7",
+    # The deterministic analysis stage. NumPy is in the *default* environment
+    # rather than the cabinet on purpose: short-time RMS and a spectral-flux
+    # novelty function are arithmetic, not a model, and putting them behind an
+    # 11 GB optional extra would make the transparent half of the pipeline the
+    # expensive half to run. decision:5 keeps *model* dependencies out of here;
+    # a 15 MB array library that ships no weights is not one of them.
+    #
+    # The exact installed version reaches every analysis cache key, because a
+    # different NumPy is a different FFT and this project caches on identity
+    # rather than on hope.
+    "numpy>=2.1,<3",
 ]
 
 [project.scripts]

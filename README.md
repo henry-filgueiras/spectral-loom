@@ -7,12 +7,12 @@ the provenance of every producing stage attached; and a projection is a back end
 record and draws from it. Prompts, seeds, and requested tempos describe what was *asked for* and
 are never presented as facts about what the audio contains.
 
-## Status: pre-alpha, two arrows of the pipeline exist
+## Status: pre-alpha, three arrows of the pipeline exist
 
 The model cabinet is pinned and stocked, a `SongSpec` becomes generated audio with a manifest that
-makes it attributable, and audio a human has accepted becomes separated stems with a manifest of
-their own. **Everything after that is unimplemented:** no timeline has been inferred and no pixel
-has been rendered.
+makes it attributable, audio a human has accepted becomes separated stems with a manifest of their
+own, and stems a human has accepted become a `song.timeline.json`. **Nothing after that is
+implemented:** no pixel has been rendered.
 
 One 45-second specimen exists for `sparse-funk-exposed-bass`, and **it has been heard.** Henry
 listened on 2026-08-20 and accepted it, so gate 2 is passed — by a human, which is the only way
@@ -116,6 +116,8 @@ identically.
 ./loom separate sparse-funk-exposed-bass
 ./loom review-separation sparse-funk-exposed-bass
 ./loom accept-separation sparse-funk-exposed-bass --reviewer Henry --reviewed-on 2026-08-20 ...
+./loom compile sparse-funk-exposed-bass
+./loom review-timeline sparse-funk-exposed-bass
 ```
 
 `generate` is the only expensive command and the only one that needs the cabinet environment. It
@@ -162,6 +164,31 @@ and two of its questions are careful on purpose: it asks whether there was *enou
 cymbal material to judge cymbal separation at all*, and it asks what was *perceived in the `vocals`
 output* rather than what the source contained. Neither an unanswerable question nor a failure to
 assign may be written down as a fact about the music.
+
+`compile` reads the stems a human accepted and writes `song.timeline.json`. It runs **no model**
+and needs **no cabinet**: the analysis is deterministic arithmetic in the default environment —
+short-time RMS, a hysteresis rule over it, and a half-wave-rectified spectral-flux novelty function
+— and every parameter that can change an event is in the document and in the cache key. Three event
+types, because gate 4 admits three: `activity.sample` is `observed`, `activity.interval` and
+`onset` are `inferred`, and no event carries a confidence, because nothing here produces a
+calibrated one. An onset carries its raw flux, the threshold it beat, and the margin instead.
+
+Thresholds are **absolute dBFS, shared by every track, and never normalized per stem.** That is the
+one design decision in the analysis worth arguing about, and the argument is the near-silent
+`vocals` output: it sits on the separator's broadband noise floor, and a detector that normalized
+each track by its own peak would have found the loudest noise in it and called that a musical event.
+See [archaeology/decisions/0011](archaeology/decisions/0011-measure-activity-against-absolute-level-and-never-normalize-a-stem-into-significance.md).
+
+Recompiling unchanged inputs is a verified cache hit producing **byte-identical bytes**, which gate
+4 requires. Run telemetry — when it ran, how long it took — lives in a `compile-receipt.json` beside
+the timeline rather than inside it, because a boundary artifact that changed when nothing changed
+could not be cached, diffed, or compared against a later run.
+
+`review-timeline` builds the **Timeline Observatory**: the source waveform, the selected model
+output, the measured activity curve with its thresholds drawn on it, the inferred intervals, and the
+onset hypotheses, all on one Web Audio clock. Clicking an onset loops a short window around it and
+one key swaps the stem for the source mix, so answering "is that actually an audible onset" costs a
+click and a keypress. It reads the timeline and never writes it.
 
 `accept` records what a person decided after listening. It runs no model and reads no audio beyond
 hashing it, and the hash is the point: a specimen id names an *intent* and survives regeneration,
@@ -231,7 +258,21 @@ engraved sheet music, generalized DAW functionality, a large UI, and cloud infra
 
 ## Next experiment
 
-Gate 4 of [the roadmap](docs/roadmap.md).
+Gate 4 of [the roadmap](docs/roadmap.md), and like gates 2 and 3 it is not a coding task. The
+timeline exists and nobody has checked an event against the audio:
+
+```sh
+./loom review-timeline sparse-funk-exposed-bass
+```
+
+The questions are printed beside the URL, per model output. Do onset markers land on audible
+attacks, or between them? Are soft notes missed? Is kick leakage producing false bass onsets? Do
+activity intervals begin and end where phrases perceptually do? What does an onset even *mean* in
+`other`, which holds several unresolved voices? And in `vocals`, where the detector claimed nothing
+at all — is that the right answer, and does anything it might have claimed sound like music?
+
+**Gate 4 is not passed by the document validating.** Nothing downstream — no Basic Pitch, no note
+events, no projection, no second specimen — starts before Henry answers.
 
 ## Project archaeology
 

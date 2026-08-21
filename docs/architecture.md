@@ -12,10 +12,11 @@ music generator
     → visual projections  (4) back ends
 ```
 
-The first two arrows are implemented: a `SongSpec` becomes generated audio with a manifest that
-makes it attributable, and audio a human has accepted becomes separated stems with a manifest of
-their own. Nothing after that exists — no timeline, no projection. This document describes the
-shape the rest must take and the invariants none of it may violate.
+The first three arrows are implemented: a `SongSpec` becomes generated audio with a manifest that
+makes it attributable, audio a human has accepted becomes separated stems with a manifest of their
+own, and stems a human has accepted become a `song.timeline.json`. Nothing after that exists — no
+projection. This document describes the shape the rest must take and the invariants none of it may
+violate.
 
 ## The four layers
 
@@ -99,9 +100,36 @@ version, the specimen id, the source audio hash and duration, an explicit time u
 provenance of every producing stage, logical tracks, and generic timed events.
 
 An event has a namespaced type, a start, an optional end, an optional confidence, an evidence
-reference, and a namespaced payload. The vocabulary is open on purpose. Early event types are
-expected to be `activity.sample`, `activity.interval`, and `onset`; notes arrive later, and only
-after a real stem has been inspected. Chords, sections, lyrics, and engraving are not modelled.
+reference, and a namespaced payload. The vocabulary is open on purpose. The event types that exist
+are `activity.sample`, `activity.interval`, and `onset`; notes arrive later, and only after a real
+stem has been inspected. Chords, sections, lyrics, and engraving are not modelled.
+
+The analysis that produces them is deliberately **not a model**. Short-time RMS, an explicit
+hysteresis rule over it, and a half-wave-rectified spectral-flux novelty function are things a
+person can be shown and can argue with; a model here would be a second unexamined opinion stacked
+on the separator's. Every threshold is **absolute, in dBFS against full scale, and shared by every
+track** — see `archaeology/decisions/0011` for why per-stem normalization is the specific failure
+this layer had to avoid. The measurement is `observed`; the two rules over it are `inferred`; and
+nothing carries a confidence, because a novelty statistic is not a probability and scaling one into
+[0, 1] would manufacture a confidence out of arithmetic.
+
+**The timeline's `source_audio` is always the original recording**, even though every event's
+evidence is a stem. The separator resamples, so the stems are a different rate — but a timeline
+about a resampled intermediate would be a timeline nobody could check against the file they have.
+Event times are seconds on the recording's timeline; the artifact an event cites is the stem it was
+measured in.
+
+The document is **byte-identical for unchanged inputs**, and that is a requirement rather than a
+nicety: an artifact that changed when nothing changed could not be cached, diffed, or compared
+against a later run. So it contains no wall-clock, no elapsed time, no path outside the repository,
+no random identifier, and no ordering that depends on traversal. Run telemetry lives in a build
+receipt beside it. The receipt is not one of the published contracts, because `schemas/` is what
+another implementation reads and a local build record is not that.
+
+The two human verdicts — gate 2 on the source, gate 3 on the separation — are **preconditions and
+not provenance stages**. `archaeology/decisions/0010` settled that a person's fitness judgement is
+not a truth layer and not a stage, and the compiler enforces both verdicts before reading a sample
+without writing either into the document.
 
 This layer is expensive to produce and is cached. It is untracked.
 
