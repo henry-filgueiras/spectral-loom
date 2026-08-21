@@ -109,6 +109,8 @@ uv sync                                        # environment, from the committed
 ./loom bootstrap env|assets|status             # establish the model cabinet; human-invoked
 ./loom smoke                                   # run each pinned model once
 ./loom generate corpus/specs/example.yaml      # one specimen; needs the cabinet
+./loom compile sparse-funk-exposed-bass        # accepted separation -> song.timeline.json
+./loom review-timeline sparse-funk-exposed-bass  # the Timeline Observatory, for gate 4
 scarp doctor                                   # archaeology invariants
 ```
 

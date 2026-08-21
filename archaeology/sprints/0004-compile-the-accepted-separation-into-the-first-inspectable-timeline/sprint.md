@@ -2,8 +2,9 @@
 id: spr_01M0GV19568TPVR34C47C2NPVD
 sequence: 4
 kind: sprint
-status: active
+status: closed
 created: 2026-08-20
+closed: 2026-08-20
 ---
 
 # Compile the accepted separation into the first inspectable timeline
@@ -102,3 +103,99 @@ kept outside the semantic document.
 - A generalized review framework. Two review kinds may share the small primitive that already
   exists; they do not justify inventing a third abstraction.
 - Pushing commits.
+
+## Retrospective (2026-08-20)
+
+Every success criterion met. Five tasks closed, one decision, one dragon opened.
+**Gate 3 passes and is now durable. Gate 4 has its compiler, its evidence, its instrument, and no
+verdict.**
+
+### What the round changed about what this project believed
+
+**A separation is identified by a directory the next run reuses, and that was load-bearing.**
+`decision:10` fixed this one layer up: a specimen id names an intent, so gating on it would have run
+on bytes nobody heard. The same hole existed one layer down and was easier to miss, because
+`corpus/derived/<specimen>/separation/` looks like a location rather than a name. Re-separate on
+another backend, at another revision, or with one parameter changed, and that path still resolves —
+to stems nobody has heard, with a gate 3 verdict sitting beside them that appears to be about them.
+The fix is the same shape as before: key the review by the *separation manifest's* own content hash,
+list every exhibit artifact by hash, and re-hash all of them before recording a word.
+
+**Measuring before implementing changed what got implemented, and it was not close.** The obvious
+"is this track active" is per-track normalization, and on this specimen it would have been
+catastrophic *invisibly*. All four HTDemucs outputs sit on a broadband noise floor near −61 dBFS,
+and `vocals` — which Henry heard as silence — is nothing but that floor. Normalized, its loudest
+noise becomes 0 dB and the timeline acquires confident interval events about a signal a human heard
+as nothing. The events would have been indistinguishable from real ones: same type, same schema,
+same provenance, same evidence link to a real file. `decision:11` closes that door with the numbers.
+
+**The plateau, not the point, is the argument.** Sweeping the activity pair across ten decibels
+moved coverage by three percentage points and never gave `vocals` an interval; sweeping the onset
+multiplier and floor across a factor of four moved `drums` between 153 and 180 events and never gave
+`vocals` one. A threshold that sits where the answer barely moves has found a gap in the data. A
+threshold that had to be placed precisely would have been a fit to one specimen, and this project
+has exactly one specimen.
+
+**One event type turned out to carry three musical meanings.** `dragon:4`. The roadmap treats
+`activity.interval` as obvious; the data produced phrase-like intervals on `bass`, note-decay
+envelopes on `drums`, one "the track is on" interval covering 92.8% of `other`, and nothing on
+`vocals` — from one rule, unchanged. The name promises more structure than the measurement delivers.
+The wrong fixes are written into the dragon so they are not reached for later.
+
+**Determinism had to be designed, and the tests for it had to look for classes rather than
+instances.** Comparing two compiles would have caught a wall-clock in the document only by luck:
+two runs a millisecond apart can agree on a timestamp. So the tests look for a local path, a
+temporary directory, and a clock in a stage that should not have one, by name.
+
+### What exists that did not
+
+A sixth contract, `SeparationReview`, with a generated schema, reusing the `HumanReview` primitive
+the contracts already had. Two new modules: `analysis` (the arithmetic, and the argument for every
+number in it) and `timeline` (the compiler, its preconditions, its cache, and its canonical bytes),
+plus `timeline_observatory`. Three new CLI commands — `accept-separation`, `compile`,
+`review-timeline` — all routed. One tracked separation review. **327 hermetic tests, up from 224.**
+
+NumPy moved into the default environment: `decision:5` keeps *model* dependencies out of `.venv`,
+and a 15 MB array library that ships no weights is not one. Putting the transparent half of the
+pipeline behind an 11 GB optional extra would have made the arithmetic harder to run than the
+inference.
+
+4.8 MB of timeline on this machine, untracked. One 40 KB generated page, also untracked.
+
+### Two habits worth keeping
+
+**Prove the guard fires, again.** Nine bytes appended to `vocals.wav` produced a refusal naming both
+hashes and exit code 1; one byte appended to the timeline produced a named cache miss and a
+recompile back to the same sha256; editing the separation manifest after the review made the gate 3
+verdict stop resolving. Same discipline as sprint 3's negative control, applied to three new guards.
+
+**Drive the browser, not only the tests.** The Timeline Observatory's canvases all needed an
+explicit CSS height — without one, a canvas with `width: 100%` scales to preserve its attribute
+aspect ratio, and a 76-pixel lane became six hundred pixels tall on a wide window, pushing the lanes
+below it off the screen. Every Python test passed. The bug defeated the entire point of the page,
+and nothing short of looking at it would have found it.
+
+### What is unmeasured, stated so a later round does not mistake it for settled
+
+- **The timeline.** Nobody has checked an event against the audio. 153 onsets on `drums` is 153
+  hypotheses from one detector at one parameter set, and whether any of them lands on something
+  audible is exactly the open question.
+- **Everything stops around 40 s** in a 45.00 s file — last onset 39.97 s on `drums` and `bass`,
+  39.52 s on `other`, and `other`'s single interval ends at 41.77 s. Five seconds carry no inference
+  from any track. Tail, fade, or the piece ending: unknown.
+- **The median inter-onset gap is 0.30–0.33 s on all three claimed tracks**, and the specification
+  *requested* 96 BPM, at which an eighth note is 0.3125 s. Nothing here measured a tempo. The
+  request is `requested` and stays there, and a detector whose median gap resembles a subdivision is
+  not evidence that the subdivision exists.
+- **The thresholds are calibrated on one recording's absolute level.** A mix mastered thirty
+  decibels quieter would produce an empty timeline and fail silently. `dragon:4`.
+- **The onset detector cannot report an onset at t = 0**; the first frame has no predecessor and its
+  flux is zero by definition.
+- **CI has still never run**, Linux is still unexercised, and CPU separation has still never run.
+
+### Next
+
+Henry listens. `./loom review-timeline sparse-funk-exposed-bass`, then `1`–`4`, `N`, `enter`, `S`.
+The questions are printed beside the URL. **Gate 4 is not passed by this document validating**, and
+nothing downstream — no Basic Pitch, no `note` events, no projection, no second specimen — starts
+before he answers.

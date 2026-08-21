@@ -75,8 +75,24 @@ sang.
 Compile a `song.timeline.json` from stem activity and onsets. Only `activity.sample`,
 `activity.interval`, and `onset`. Full provenance on every stage.
 
+**Where it stands:** the compiler exists, refuses to run unless both human verdicts match the bytes
+on disk, and has been run once on the accepted separation — 0.3 s, no model, no cabinet, five
+provenance stages, 8 169 events across four tracks. Recompiling produced a byte-identical document
+with the same sha256, and a second invocation was a verified cache hit; corrupting the declared
+output or an input stem invalidated reuse loudly, with the reason named. The Timeline Observatory
+exists so a claim can be clicked and heard rather than read out of JSON. **Nobody has checked an
+event against the audio.** The gate is not passed by the document validating, and the counts below
+are descriptive rather than findings.
+
+Per model output, under one hysteresis rule at −50/−56 dBFS and one spectral-flux detector:
+`drums` 50 intervals and 153 onset hypotheses, `bass` 29 and 95, `other` 1 and 97, `vocals` **0 and
+0** — which means that detector claimed nothing about that output, and not that nobody sang.
+`archaeology/decisions/0011` records why every threshold is absolute; `archaeology/dragons/0004`
+records that one rule turned out to carry at least three different musical meanings.
+
 **Passes when:** the timeline validates, its events are spot-checked against the audio by a human,
 and re-running the compiler on unchanged inputs hits cache and produces a byte-identical document.
+Two of the three are done; the middle one is Henry's.
 
 ## Gate 5 — Note inference, optional
 
