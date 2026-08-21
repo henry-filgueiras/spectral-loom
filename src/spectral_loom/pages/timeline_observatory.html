@@ -106,6 +106,10 @@ input[type=range] { vertical-align: middle; accent-color: var(--hypo); }
   border-left: 1px solid rgba(111,208,192,.55); border-right: 1px solid rgba(111,208,192,.55);
   display: none;
 }
+#loopin-mark {
+  position: absolute; top: 0; bottom: 0; width: 0;
+  border-left: 1px dashed rgba(111,208,192,.8); display: none;
+}
 #inspector {
   margin-top: 18px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel);
   padding: 12px 14px;
@@ -173,6 +177,7 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
     <label class="opt"><input type="checkbox" id="clicks"> <b>C</b>&nbsp;click on events</label>
     <label class="opt">level <input type="range" id="clickLevel" min="0" max="100" value="45"
       style="width:90px"></label>
+    <label class="opt"><input type="checkbox" id="edges"> every interval edge</label>
     <span class="sep"></span>
     <label class="opt"><input type="checkbox" id="candidates" checked> show declined peaks</label>
     <span class="sep"></span>
@@ -254,7 +259,7 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
       </div>
       <div class="wave"><canvas data-canvas="onsets" height="80"></canvas></div>
     </div>
-    <div id="overlay"><div id="loop"></div><div id="playhead"></div></div>
+    <div id="overlay"><div id="loop"></div><div id="loopin-mark"></div><div id="playhead"></div></div>
     <div id="hit"></div>
   </div>
 
@@ -852,11 +857,20 @@ function draw() {
     el.style.left = `${xOf(loop.a, w)}px`;
     el.style.width = `${Math.max(1, xOf(loop.b, w) - xOf(loop.a, w))}px`;
   } else el.style.display = 'none';
+  // A pending in point, waiting for its out point. Without it, pressing `[`
+  // looks like nothing happened.
+  const pending = document.getElementById('loopin-mark');
+  if (loop.a !== null && loop.b === null) {
+    pending.style.display = 'block';
+    pending.style.left = `${xOf(loop.a, w)}px`;
+  } else pending.style.display = 'none';
   const loopText = looping() ? `  loop ${fmt(loop.a)} - ${fmt(loop.b)}` : '';
+  const pendingText = (loop.a !== null && loop.b === null)
+    ? `  loop in ${fmt(loop.a)}, press ] for the out point` : '';
   document.getElementById('viewinfo').textContent =
-    (view.b - view.a >= duration - 0.01)
+    ((view.b - view.a >= duration - 0.01)
       ? 'whole file' + loopText
-      : `view ${fmt(view.a)} - ${fmt(view.b)}` + loopText;
+      : `view ${fmt(view.a)} - ${fmt(view.b)}` + loopText) + pendingText;
 }
 function frame() { draw(); requestAnimationFrame(frame); }
 
@@ -949,6 +963,9 @@ function select(kind, event, index) {
     'model output and the source mix while it loops.</p>';
   document.getElementById('rawWrap').style.display = 'block';
   document.getElementById('rawJson').textContent = JSON.stringify(event, null, 2);
+  // Synchronous, not debounced: `audition()` runs immediately after this and
+  // must start the buffer that already contains this interval's edges.
+  if (buffers[CLICK_LANE]) buildClicks();
   redraw();
 }
 function escapeHtml(s) {
@@ -1029,8 +1046,8 @@ function pickAt(time, kind) {
    What clicks is exactly what the marker lane draws: accepted onsets, declined
    peaks when they are shown, and what-ifs when the floor is not the compiled
    one. Three pitches, so which kind you are hearing needs no glance. */
-const CLICK_TONE = { accepted: 2400, declined: 950, whatif: 1550 };
-const CLICK_GAIN = { accepted: 1.0, declined: 0.5, whatif: 0.7 };
+const CLICK_TONE = { accepted: 2400, declined: 950, whatif: 1550, edge_in: 620, edge_out: 420 };
+const CLICK_GAIN = { accepted: 1.0, declined: 0.5, whatif: 0.7, edge_in: 0.9, edge_out: 0.9 };
 let clickTimer = null;
 
 function clickEvents() {
@@ -1045,6 +1062,22 @@ function clickEvents() {
     const accepted = new Set(data.onsets.map(e => e.start_s));
     hypoOnsets.forEach(o => {
       if (!accepted.has(o.start_s)) out.push([o.start_s, 'whatif']);
+    });
+  }
+  // The edges of whichever interval is selected, always. Auditioning an
+  // interval plays a context margin either side of it, and without an audible
+  // boundary there is no way to tell whether a sound at the start of the loop
+  // is inside the span, spilling over from the one before it, or claimed by
+  // nothing at all. Two clicks, only on the selected span, so scanning for
+  // onsets is not buried under a hundred boundaries.
+  if (selection && selection.kind === 'interval') {
+    out.push([selection.event.start_s, 'edge_in']);
+    out.push([selection.event.end_s, 'edge_out']);
+  }
+  if (document.getElementById('edges').checked) {
+    data.intervals.forEach(e => {
+      out.push([e.start_s, 'edge_in']);
+      out.push([e.end_s, 'edge_out']);
     });
   }
   return out;
@@ -1227,6 +1260,7 @@ document.getElementById('candidates').addEventListener('input', () => {
   redraw(); refreshClicks();
 });
 document.getElementById('clicks').addEventListener('input', applyGains);
+document.getElementById('edges').addEventListener('input', refreshClicks);
 document.getElementById('clickLevel').addEventListener('input', applyGains);
 document.getElementById('floor').addEventListener('input', refreshFloor);
 document.getElementById('floorValue').addEventListener('input', () => {
@@ -1335,8 +1369,8 @@ window.addEventListener('keydown', e => {
   }
   if (k === 'N') { step('onset', -1); return; }
   if (k === 'Enter') { audition(); return; }
-  if (k === '[') { loop.a = position(); normaliseLoop(); return; }
-  if (k === ']') { loop.b = position(); normaliseLoop(); return; }
+  if (k === '[') { setLoopIn(); return; }
+  if (k === ']') { setLoopOut(); return; }
   if (k === 'f' || k === 'F') { fitView(); return; }
   if (k === '-' || k === '_') { zoom(2); return; }
   if (k === '=' || k === '+') { zoom(0.5); return; }
@@ -1351,10 +1385,23 @@ window.addEventListener('keydown', e => {
     fitView(); restart();
   }
 });
-function normaliseLoop() {
-  if (loop.a !== null && loop.b !== null && loop.b < loop.a) {
-    const t = loop.a; loop.a = loop.b; loop.b = t;
-  }
+/* Setting the in point starts a *new* selection rather than editing the live
+   one, and that is a bug fix rather than a preference. While a loop is active
+   playback is confined to it, so the playhead can never be outside it — which
+   made setting either bound from the playhead a one-way ratchet that could only
+   ever shrink the window, however many times it was pressed. Clearing the out
+   point releases the confinement, so the playhead can travel to wherever the
+   new out point belongs. */
+function setLoopIn() {
+  loop = { a: position(), b: null };
+  restart();
+}
+function setLoopOut() {
+  // An out point with no in point means "from the beginning to here", which is
+  // the only reading that is never a surprise.
+  if (loop.a === null) loop.a = 0;
+  loop.b = position();
+  if (loop.b < loop.a) { const t = loop.a; loop.a = loop.b; loop.b = t; }
   restart();
 }
 let resizeTimer = null;

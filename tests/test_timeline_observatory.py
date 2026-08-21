@@ -502,3 +502,36 @@ def test_a_note_is_written_onto_the_mark_without_re_rendering_the_list(
     """Re-rendering per keystroke would take the cursor away mid-word."""
     page = render(exhibit_for(tmp_path)[0])
     assert "would take the cursor away mid-word" in page
+
+
+def test_setting_a_loop_in_point_starts_a_new_selection(tmp_path: Path) -> None:
+    """The ratchet: while a loop is active playback is confined to it, so the
+    playhead can never be outside it, so setting either bound from the playhead
+    could only ever shrink the window. Clearing the out point releases the
+    confinement."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "one-way ratchet" in page
+    assert "loop = { a: position(), b: null };" in page
+
+
+def test_an_out_point_with_no_in_point_means_from_the_beginning(tmp_path: Path) -> None:
+    page = render(exhibit_for(tmp_path)[0])
+    assert "if (loop.a === null) loop.a = 0;" in page
+    assert "never a surprise" in page
+
+
+def test_a_pending_in_point_is_visible(tmp_path: Path) -> None:
+    """Otherwise pressing `[` looks like nothing happened."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "loopin-mark" in page
+    assert "press ] for the out point" in page
+
+
+def test_the_selected_interval_gets_audible_boundaries(tmp_path: Path) -> None:
+    """Auditioning an interval plays a margin either side; without an audible
+    edge there is no telling whether a sound at the start of the loop is inside
+    the span, spilling from the one before, or claimed by nothing."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "edge_in" in page and "edge_out" in page
+    assert "spilling over from the one before it" in page
+    assert "every interval edge" in page
