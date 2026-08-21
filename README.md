@@ -7,7 +7,7 @@ the provenance of every producing stage attached; and a projection is a back end
 record and draws from it. Prompts, seeds, and requested tempos describe what was *asked for* and
 are never presented as facts about what the audio contains.
 
-## Status: pre-alpha, three arrows of the pipeline exist
+## Status: pre-alpha, three arrows of the pipeline exist and have been judged by ear
 
 The model cabinet is pinned and stocked, a `SongSpec` becomes generated audio with a manifest that
 makes it attributable, audio a human has accepted becomes separated stems with a manifest of their
@@ -118,6 +118,7 @@ identically.
 ./loom accept-separation sparse-funk-exposed-bass --reviewer Henry --reviewed-on 2026-08-20 ...
 ./loom compile sparse-funk-exposed-bass
 ./loom review-timeline sparse-funk-exposed-bass
+./loom accept-timeline sparse-funk-exposed-bass --reviewer Henry --reviewed-on 2026-08-21 ...
 ```
 
 `generate` is the only expensive command and the only one that needs the cabinet environment. It
@@ -279,23 +280,17 @@ user supplies deliberately. Also out of scope: live streaming, remote inference,
 engraved sheet music, generalized DAW functionality, a large UI, and cloud infrastructure. See
 [docs/roadmap.md](docs/roadmap.md) for the full deferral list.
 
+**Gate 4 is passed.** Henry spot-checked the timeline against the audio over two days and accepted
+it with its limitations recorded: the detector's precision is good — one false positive in 95 `bass`
+onsets — and essentially every failure is a recall failure on quiet or dense material, from one
+mechanism. `archaeology/logs/0002` has all eighteen findings, including a confirmed cross-stem
+leakage measured at a waveform correlation of 0.969, and `archaeology/dragons/0004` records that
+`activity.interval` is the weakest part of the vocabulary and should not be built on as it stands.
+
 ## Next experiment
 
-Gate 4 of [the roadmap](docs/roadmap.md), and like gates 2 and 3 it is not a coding task. The
-timeline exists and nobody has checked an event against the audio:
-
-```sh
-./loom review-timeline sparse-funk-exposed-bass
-```
-
-The questions are printed beside the URL, per model output. Do onset markers land on audible
-attacks, or between them? Are soft notes missed? Is kick leakage producing false bass onsets? Do
-activity intervals begin and end where phrases perceptually do? What does an onset even *mean* in
-`other`, which holds several unresolved voices? And in `vocals`, where the detector claimed nothing
-at all — is that the right answer, and does anything it might have claimed sound like music?
-
-**Gate 4 is not passed by the document validating.** Nothing downstream — no Basic Pitch, no note
-events, no projection, no second specimen — starts before Henry answers.
+Gate 5 of [the roadmap](docs/roadmap.md), or a second specimen. Everything measured so far is one
+45-second recording, one genre, one separator, one backend.
 
 ## Project archaeology
 

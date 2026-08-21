@@ -1,0 +1,203 @@
+{
+  "analysis": [
+    {
+      "duration_ms": null,
+      "input_hashes": {
+        "bass": "sha256:0b64d1ef4f3f5c439122ed8c210f76fac8be1c7f110e4046005b77096f0b8126",
+        "drums": "sha256:533be3f197852d7a4b546c66e383a6f743b84bdda1f72bb2c1822a39820f2b0f",
+        "other": "sha256:19de0df1ea4f8ef4edf17e75f7b6ee9ace908f0f496dc7bb5d663d4c127041c5",
+        "vocals": "sha256:e4353ec05c8370ad0ed7ed44b3a8086214c492ed3ad2db2bd6c4aee6e2e4d082"
+      },
+      "output_hashes": {},
+      "parameters": {
+        "downmix": "channel_mean",
+        "hop_samples": 1024,
+        "rounding": {
+          "amplitude_places": 6,
+          "db_places": 3,
+          "flux_places": 6,
+          "time_places": 6
+        },
+        "silence_floor_dbfs": -120.0,
+        "window_samples": 2048
+      },
+      "runtime": null,
+      "stage": "activity.measure",
+      "started_at": null,
+      "tool": "spectral_loom.analysis",
+      "tool_revision": "spectral-loom==0.0.1 numpy==2.4.6",
+      "truth_layer": "observed"
+    },
+    {
+      "duration_ms": null,
+      "input_hashes": {
+        "bass": "sha256:0b64d1ef4f3f5c439122ed8c210f76fac8be1c7f110e4046005b77096f0b8126",
+        "drums": "sha256:533be3f197852d7a4b546c66e383a6f743b84bdda1f72bb2c1822a39820f2b0f",
+        "other": "sha256:19de0df1ea4f8ef4edf17e75f7b6ee9ace908f0f496dc7bb5d663d4c127041c5",
+        "vocals": "sha256:e4353ec05c8370ad0ed7ed44b3a8086214c492ed3ad2db2bd6c4aee6e2e4d082"
+      },
+      "output_hashes": {},
+      "parameters": {
+        "downmix": "channel_mean",
+        "enter_dbfs": -50.0,
+        "exit_dbfs": -56.0,
+        "hop_samples": 1024,
+        "merge_gap_s": 0.1,
+        "min_duration_s": 0.1,
+        "rounding": {
+          "amplitude_places": 6,
+          "db_places": 3,
+          "flux_places": 6,
+          "time_places": 6
+        },
+        "rule": "enter at or above enter_dbfs, leave below exit_dbfs, merge runs separated by less than merge_gap_s, then discard what is shorter than min_duration_s",
+        "silence_floor_dbfs": -120.0,
+        "window_samples": 2048
+      },
+      "runtime": null,
+      "stage": "activity.interval",
+      "started_at": null,
+      "tool": "spectral_loom.analysis",
+      "tool_revision": "spectral-loom==0.0.1 numpy==2.4.6",
+      "truth_layer": "inferred"
+    },
+    {
+      "duration_ms": null,
+      "input_hashes": {
+        "bass": "sha256:0b64d1ef4f3f5c439122ed8c210f76fac8be1c7f110e4046005b77096f0b8126",
+        "drums": "sha256:533be3f197852d7a4b546c66e383a6f743b84bdda1f72bb2c1822a39820f2b0f",
+        "other": "sha256:19de0df1ea4f8ef4edf17e75f7b6ee9ace908f0f496dc7bb5d663d4c127041c5",
+        "vocals": "sha256:e4353ec05c8370ad0ed7ed44b3a8086214c492ed3ad2db2bd6c4aee6e2e4d082"
+      },
+      "output_hashes": {},
+      "parameters": {
+        "downmix": "channel_mean",
+        "fft_samples": 2048,
+        "flux_floor": 20.0,
+        "hop_samples": 512,
+        "median_multiplier": 2.0,
+        "median_radius_frames": 9,
+        "min_gap_s": 0.05,
+        "novelty": "half_wave_rectified_spectral_flux_l1",
+        "peak_radius_frames": 3,
+        "rounding": {
+          "amplitude_places": 6,
+          "db_places": 3,
+          "flux_places": 6,
+          "time_places": 6
+        },
+        "rule": "a frame is an onset when its flux is the largest within peak_radius_frames, is at least median_multiplier times the local median plus flux_floor, and is at least min_gap_s after the previous accepted onset",
+        "silence_floor_dbfs": -120.0,
+        "temporal_resolution": "one hop; no onset is more precise than hop_samples / sample_rate",
+        "window": "hann_periodic"
+      },
+      "runtime": null,
+      "stage": "onset.spectral_flux",
+      "started_at": null,
+      "tool": "spectral_loom.analysis",
+      "tool_revision": "spectral-loom==0.0.1 numpy==2.4.6",
+      "truth_layer": "inferred"
+    }
+  ],
+  "cache_key": "sha256:4808c534fb75376e0e2b2c49830721938c2189c19d1ecdb8133899b430849cd6",
+  "event_counts": {
+    "htdemucs.bass": {
+      "activity.interval": 29,
+      "activity.sample": 1936,
+      "onset": 95
+    },
+    "htdemucs.drums": {
+      "activity.interval": 50,
+      "activity.sample": 1936,
+      "onset": 153
+    },
+    "htdemucs.other": {
+      "activity.interval": 1,
+      "activity.sample": 1936,
+      "onset": 97
+    },
+    "htdemucs.vocals": {
+      "activity.interval": 0,
+      "activity.sample": 1936,
+      "onset": 0
+    }
+  },
+  "findings": "archaeology/logs \u2014 the gate 4 review log, eighteen findings",
+  "review": {
+    "accepted": true,
+    "criteria": [
+      {
+        "id": "onsets-coincide-with-audible-events",
+        "notes": "On bass, 94 of 95 accepted onsets have either a pitch change or a level rise behind them. On drums, described as overall not bad with one flagged event in 153. On other, the detector reliably catches what is clearly plucked or enunciated.",
+        "question": "Do accepted onsets generally coincide with events audible in the model output?",
+        "response": "yes"
+      },
+      {
+        "id": "audible-events-the-detector-declined",
+        "notes": "Repeatedly, and always the same kind of thing: hammer-ons on bass and other, a quiet hi-hat shuffle on drums, a hi-hat ghost note, quick fills and licks, and an entire dense flourish after 39.5 s in which 19 novelty peaks were declined and none accepted. Every one is quiet material judged against a neighbourhood that is not quiet.",
+        "question": "Were audible events found that the detector declined?",
+        "response": "yes"
+      },
+      {
+        "id": "intervals-match-perceived-structure",
+        "notes": "No, and not by a small margin. On drums the spans are per-hit decay envelopes rather than phrases; on other the whole 41.8 s is one span; and the interval count on both is determined by where the 100 ms merge threshold falls in a continuous distribution of gaps, with no plateau anywhere. Auditioning was noticeably harder on other for exactly this reason.",
+        "question": "Do activity intervals begin and end where musical structure perceptually begins and ends?",
+        "response": "no"
+      },
+      {
+        "id": "near-silent-output-correctly-unclaimed",
+        "notes": "Yes. Events appear only when the multiplier drops to 1.6 or below AND the floor to 4.5 or below, at which point the audio sounds like nothing and the click track is just a click. A few hundred appear at floor 0, sounding somewhat swing-like in rhythm but not consistently enough to be meaningful, which is what a noise floor sounds like when a detector is asked to find structure in it.",
+        "question": "Was the near-silent model output correctly left unclaimed, and did anything it would claim under relaxed parameters sound like nothing?",
+        "response": "yes"
+      },
+      {
+        "id": "cross-stem-leakage-perceived",
+        "notes": "Yes, once, confirmed by measurement rather than by coincidence: at 12.190 s the bass and drums stems correlate at 0.969 below 300 Hz, against a median of 0.092 and a maximum of 0.659 across every other accepted bass onset. A second suspected case at 7.210 s is possible but unproven. Which instrument the shared signal belongs to cannot be established from the stems, because both stems are the separator's opinion.",
+        "question": "Was content belonging to one model output perceived in another output's events?",
+        "response": "yes"
+      },
+      {
+        "id": "event-timings-perceptually-aligned",
+        "notes": "Yes, within the detector's stated 11.6 ms resolution. The click track was what made this checkable at all; judging a marker against an attack by eye asks for tens of milliseconds of visual resolution against a waveform.",
+        "question": "Are event timings perceptually aligned with the recording?",
+        "response": "yes"
+      },
+      {
+        "id": "mistakes-nameable-in-the-instrument",
+        "notes": "Yes, and this is the answer the gate was really asking for. Eighteen findings were produced, including a confirmed cross-stem leakage, the single false positive among 95 bass onsets, a non-monotonicity in the rule, and a class of gradual swells the detector cannot reach at any parameter setting. The instrument needed twelve rounds of improvement during the review to get there.",
+        "question": "Were the detector's mistakes findable and nameable using the review surface, without reading JSON?",
+        "response": "yes"
+      },
+      {
+        "id": "vocabulary-useful-for-synchronized-visuals",
+        "notes": "Yes. The reviewer would want drum sound categories disambiguated \u2014 cymbal, toms, hi-hat, bass drum \u2014 but judges the existing vocabulary likely to carry meaningfully correlated visualisations derived from analysing a recording, well short of note-chart resolution and well beyond folding instrumental nuance into five colours.",
+        "question": "Does this minimal vocabulary already feel useful for future synchronized visual work?",
+        "response": "yes"
+      },
+      {
+        "id": "semantics-misleading-enough-to-fail",
+        "notes": "No. Nothing found indicates an outright failure. There is plenty to tweak, and other material should be run through the same gauntlet, but no event semantics misleads about what it is claiming.",
+        "question": "Is any event semantics misleading enough that this gate should fail and the rule be reconsidered?",
+        "response": "no"
+      }
+    ],
+    "method": "Spot-checked every model output in the Timeline Observatory against the audio, on one shared transport clock, with a click track sonifying the markers, hypothetical floor and multiplier controls for asking what another rule would have accepted, and the declined peaks drawn alongside the accepted ones. Unaided ears. No measurement by the reviewer beyond what the instrument displayed.",
+    "notes": "Gate 4 passes, with its limitations recorded rather than resolved. What passed is narrow and the purpose states it: this document is usable and attributable, and its mistakes are findable by a person. It is not accurate, and the eighteen findings say exactly how it is not. The detector's precision is good on both tracks examined closely \u2014 one false positive in 95 bass onsets and one flagged event in 153 drums onsets \u2014 and essentially every failure is a recall failure on quiet or dense material, arising from one mechanism: the adaptive term reads a busy neighbourhood as evidence that nothing in it is exceptional. The activity interval vocabulary is the weakest part and should not be built on without reconsidering it. This gate was passed by the instrument being good enough to argue with, not by the detector being right.",
+    "purpose": "This exact compiled timeline is a usable, attributable semantic artifact for the next stage of this project, and its mistakes are findable by a person. This is NOT a claim that its events are musically correct: a timeline may pass this gate while missing real events and claiming unreal ones, provided the misses and the claims have been found and written down. Accepting it licenses reading the document; it licenses nothing about what the recording contains.",
+    "reviewed_on": "2026-08-21",
+    "reviewer": "Henry"
+  },
+  "schema_id": "spectral-loom/timeline-review",
+  "schema_version": "0.1.0",
+  "separation_review_hash": "sha256:f81b041ed6e23a45e6f13e029d1775ec6d47551a98bc4cd455732da0d995f931",
+  "source_audio": {
+    "channels": 2,
+    "duration_s": 45.0,
+    "hash": "sha256:8ff73623a29d213b0732296c5dfbff1aa8908fc2a78647b14ed754209b9aa628",
+    "sample_rate_hz": 48000
+  },
+  "specimen_id": "sparse-funk-exposed-bass",
+  "specimen_review_hash": "sha256:0308123e6345b1373154e5d75b59d878251941cc136da4f6b86c38c362a3762b",
+  "timeline_hash": "sha256:47e0178cc5b940c4545104c6c4eedb73b5f04d044f4e00b22dce23a583c977c4",
+  "timeline_path": "corpus/derived/sparse-funk-exposed-bass/timeline/song.timeline.json"
+}

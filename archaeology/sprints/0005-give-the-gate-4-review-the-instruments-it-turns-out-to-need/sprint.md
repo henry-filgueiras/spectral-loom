@@ -2,8 +2,9 @@
 id: spr_01M0GY4NYH1Q6R9HS0X7QKXSH4
 sequence: 5
 kind: sprint
-status: active
+status: closed
 created: 2026-08-20
+closed: 2026-08-21
 ---
 
 # Give the gate 4 review the instruments it turns out to need
@@ -67,3 +68,104 @@ is not the same act, and it is the one that lets a verdict be reached on evidenc
 - The gate 6 analytical projection. This is still one page for one gate.
 - A second specimen or a corpus.
 - Pushing commits.
+
+## Retrospective (2026-08-21)
+
+Closed with gate 4 passed. Twelve tasks, one contract, two archaeology artifacts, and a review that
+produced eighteen findings.
+
+**The sprint's premise turned out to be right in a way that was uncomfortable to watch.** It was
+opened as "give the gate 4 review the instruments it turns out to need", on the theory that the
+Timeline Observatory — built one sprint earlier specifically to make gate 4 judgeable — would prove
+insufficient in ways nobody could predict. It did, twelve times. Within minutes of real use it was
+found unable to show a rejected candidate. Then unable to sonify a marker. Then unable to move the
+multiplier. Then unable to show what the other outputs claimed at the same instant. Each gap was
+obvious in retrospect and none was anticipated.
+
+The lesson is not "the Observatory was badly built". It is that **an instrument for judging evidence
+cannot be specified before someone tries to judge with it**, and a sprint shaped to admit that
+produced a far better review than a planned one would have.
+
+### What the round changed about what this project believed
+
+**The detector is conservative and mostly right, which nobody expected from the first few findings.**
+Read one at a time, findings 1, 2, 3 and 6 suggested a detector in trouble. Read together with the
+classification of all 95 `bass` onsets — 61 with a pitch change behind them, 32 with a level rise,
+**one with neither, and Henry found that one** — they say something quite different: precision is
+good, recall is where the failures are, and they are all one mechanism. Sequencing matters when
+findings arrive one at a time from a human, and the temptation to conclude early was real.
+
+**One mechanism, stated in its strongest form: the adaptive term reads a busy neighbourhood as
+evidence that nothing in it is exceptional.** The dense flourish after 39.5 s on `other` is the
+clearest instance in the specimen — 19 novelty peaks, zero accepted, at a level *louder* than the
+track's own median. Not quiet. Uniformly eventful.
+
+**`decision:11` was corrected twice, and both corrections came from listening.** First for reasoning
+about counts when the question was content: the sweep showed drums moving 153 to 180 and called it a
+plateau, but the band between floor 5 and floor 20 is an entire hi-hat shuffle layer. Second for
+being single-parameter throughout: with both dials movable there is a two-dimensional region that
+admits the quiet material while leaving `vocals` unclaimed, and no one-at-a-time sweep could see it.
+The decision's core — absolute rather than per-stem-normalised — survives and is better evidenced
+than ever: at floor 0 the near-silent output takes 138 onsets.
+
+**A third failure mode exists and no threshold touches it.** The confirmed leakage at 12.190 s is a
+*correct analysis of incorrect evidence*. `docs/architecture.md` has said since sprint 1 that a stem
+is "a model's opinion rather than a measurement"; this is the first time that produced a concrete
+consequence in a timeline, and the honest position is that the event is a true positive with respect
+to `bass.wav` and possibly a false positive with respect to the music, with nothing in the document
+able to distinguish them.
+
+**And the machine got stuck exactly where the human did.** At gate 3 Henry answered
+`bass-leakage-perceived` as `unclear` — *"could equally be a muted bass note; the reviewer could not
+tell which."* At 12.190 the measurements cannot tell either: decay does not discriminate, flatness
+does not discriminate, and the source cannot arbitrate because the source is everything at once.
+That convergence is worth more than either verdict would have been.
+
+### Two habits that paid, and one that failed usefully
+
+**Corroborate a perception with a measurement that could disagree with it.** Every one of Henry's
+marks was tested against something that might have contradicted it, and the tests earned their keep
+in both directions: 12.190 was *confirmed* by a waveform correlation of 0.969 where coincidence in
+time proved nothing, and 26.587 — reported as a ghost note — was *not* a false positive but a genuine
+re-attack the ear fuses. A review where the instrument only ever agrees is not a review.
+
+**Drive the browser.** Two bugs shipped with the entire Python suite green: a page that never
+executed because a `\n` written in JavaScript was consumed by Python's own string parser, and
+canvases six hundred pixels tall because a canvas with `width: 100%` and no CSS height preserves its
+attribute aspect ratio. Tests that assert what a page *says* are just as true of a page that never
+runs. The template now lives in a file where the trap is unreachable.
+
+**A hypothesis died, and its death tidied the story.** 15.093 shifts pitch *down*, and half-wave
+rectification made an asymmetry look inevitable. Measured across ~1,400 dominant-partial steps it is
+not there, and the small differences run in opposite directions on two tracks. There is no separate
+downward-shift blind spot; there is one mechanism, and the failed prediction is what established
+that.
+
+### What exists that did not
+
+A seventh contract, `TimelineReview`, keyed by the document's own sha256 — `decision:10`'s argument
+made for the third time and no weaker for it. `require_timeline_accepted` exists with nothing
+consuming it yet, because gate 5 and gate 6 will read a timeline and the precondition should be
+waiting when they do. One new command, `accept-timeline`, routed. **390 hermetic tests, up from 341**
+at the start of the sprint.
+
+Two archaeology artifacts that will outlive the code: `log:2`, the eighteen findings with their
+measurements, and `idea:1`, the percussion-category question Henry raised — parked deliberately,
+behind `dragon:4` and behind a second specimen.
+
+### What is unmeasured, stated so a later round does not mistake it for settled
+
+- **One specimen. 45 seconds. One genre, one separator, one backend.** Every number in this sprint.
+- **The 58 extra `bass` events** a relaxed rule admits. Nobody has listened to them, and the review
+  established that relaxing a threshold does not only add.
+- **`dragon:4` is not resolved**, only much better evidenced. `activity.interval` is now known to be
+  the weakest part of the vocabulary; what it should be instead is not known.
+- **The direction of the 12.190 leakage**, and whether 7.210 is leakage at all.
+- **CI has still never run. Linux is still unexercised. CPU separation has still never run.** Three
+  sprints in a row.
+
+### Next
+
+Gate 5, or a second specimen. The strongest argument for the second specimen is that this sprint
+produced eighteen findings and every one of them is about one recording — including the ones that
+read most like general statements about the rule.

@@ -48,8 +48,10 @@ from spectral_loom.contracts import (
     ReviewedArtifact,
     SeparationManifest,
     SeparationReview,
+    SongTimeline,
     SpecimenReview,
     SupplementaryListening,
+    TimelineReview,
 )
 from spectral_loom.hashing import hash_bytes
 
@@ -647,4 +649,247 @@ def require_separation_accepted(
         f"A separation lives in a directory the next run reuses, so a result being present "
         f"where an accepted one used to be is not evidence that anybody heard it — and this "
         f"stage will not treat it as such."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The gate 4 question set: what a human decided about one compiled timeline.
+# ---------------------------------------------------------------------------
+
+#: What gate 4 asks. The wordings carry the same load they did at gate 3: every
+#: answer is a perception of a *detector's output*, and none of them may be read
+#: as a measurement of the recording. "Audible events were found that the
+#: detector declined" says a person heard something the rule did not accept; it
+#: establishes nothing about how many events the music holds.
+#:
+#: The last two are the ones that actually decide the gate, and they are
+#: judgements rather than observations. They are asked last on purpose.
+GATE_4_CRITERIA: tuple[Criterion, ...] = (
+    Criterion(
+        id="onsets-coincide-with-audible-events",
+        flag="--onsets-coincide",
+        question="Do accepted onsets generally coincide with events audible in the model output?",
+        help="whether the claims the detector made land on things a listener can hear",
+    ),
+    Criterion(
+        id="audible-events-the-detector-declined",
+        flag="--onsets-missed",
+        question="Were audible events found that the detector declined?",
+        help="whether the review turned up real material the rule turned down",
+    ),
+    Criterion(
+        id="intervals-match-perceived-structure",
+        flag="--intervals-match",
+        question=(
+            "Do activity intervals begin and end where musical structure perceptually begins "
+            "and ends?"
+        ),
+        help="whether the spans correspond to anything a listener would call a unit",
+    ),
+    Criterion(
+        id="near-silent-output-correctly-unclaimed",
+        flag="--near-silent-unclaimed",
+        question=(
+            "Was the near-silent model output correctly left unclaimed, and did anything it "
+            "would claim under relaxed parameters sound like nothing?"
+        ),
+        help="whether the absolute floor is doing the job it was chosen for",
+    ),
+    Criterion(
+        id="cross-stem-leakage-perceived",
+        flag="--leakage",
+        question=(
+            "Was content belonging to one model output perceived in another output's events?"
+        ),
+        help=(
+            "whether any event is a correct reading of an incorrect stem; this is about the "
+            "separation showing through, not about the detector"
+        ),
+    ),
+    Criterion(
+        id="event-timings-perceptually-aligned",
+        flag="--timings-aligned",
+        question="Are event timings perceptually aligned with the recording?",
+        help="whether a marker lands where the sound is, within the detector's own resolution",
+    ),
+    Criterion(
+        id="mistakes-nameable-in-the-instrument",
+        flag="--mistakes-nameable",
+        question=(
+            "Were the detector's mistakes findable and nameable using the review surface, "
+            "without reading JSON?"
+        ),
+        help=(
+            "the gate's real subject: an inference nobody can inspect is not evidence of "
+            "anything, however accurate it happens to be"
+        ),
+    ),
+    Criterion(
+        id="vocabulary-useful-for-synchronized-visuals",
+        flag="--vocabulary-useful",
+        question=(
+            "Does this minimal vocabulary already feel useful for future synchronized visual work?"
+        ),
+        help="a judgement about where this is going, not an observation about what it does",
+    ),
+    Criterion(
+        id="semantics-misleading-enough-to-fail",
+        flag="--misleading",
+        question=(
+            "Is any event semantics misleading enough that this gate should fail and the rule "
+            "be reconsidered?"
+        ),
+        help="the decisive question; 'yes' fails the gate",
+    ),
+)
+
+#: What accepting a timeline at gate 4 commits the project to. Narrower than it
+#: looks, and deliberately so.
+GATE_4_PURPOSE = (
+    "This exact compiled timeline is a usable, attributable semantic artifact for the next stage "
+    "of this project, and its mistakes are findable by a person. This is NOT a claim that its "
+    "events are musically correct: a timeline may pass this gate while missing real events and "
+    "claiming unreal ones, provided the misses and the claims have been found and written down. "
+    "Accepting it licenses reading the document; it licenses nothing about what the recording "
+    "contains."
+)
+
+GATE_4_METHOD = (
+    "Spot-checked every model output in the Timeline Observatory against the audio, on one shared "
+    "transport clock, with a click track sonifying the markers, hypothetical floor and multiplier "
+    "controls for asking what another rule would have accepted, and the declined peaks drawn "
+    "alongside the accepted ones. Unaided ears. No measurement by the reviewer beyond what the "
+    "instrument displayed."
+)
+
+
+def timeline_review_path(repository_root: Path, specimen_id: str, timeline_hash: str) -> Path:
+    """Where the review of one exact compiled timeline lives."""
+    return reviews_dir(repository_root) / (
+        f"{specimen_id}.{short_hash(timeline_hash)}.timeline-review.json"
+    )
+
+
+def existing_timeline_reviews(repository_root: Path, specimen_id: str) -> list[Path]:
+    directory = reviews_dir(repository_root)
+    if not directory.is_dir():
+        return []
+    return sorted(directory.glob(f"{specimen_id}.*.timeline-review.json"))
+
+
+def write_timeline_review(path: Path, review: TimelineReview) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(review.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def load_timeline_review(path: Path) -> TimelineReview:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ReviewError(f"cannot read {path}: {exc}") from exc
+    try:
+        return TimelineReview.model_validate(document)
+    except ValidationError as exc:
+        raise ReviewError(f"{path} is not a valid timeline review: {exc}") from exc
+
+
+def require_timeline_accepted(
+    repository_root: Path, specimen_id: str, timeline_hash: str
+) -> tuple[TimelineReview, Path]:
+    """The accepted review for exactly this timeline, or a refusal that says why.
+
+    Nothing consumes this yet. It exists because gate 5 and gate 6 will read a
+    timeline, and the argument that made `separate` require gate 2 and `compile`
+    require gate 3 does not weaken by being made a third time.
+    """
+    candidates = existing_timeline_reviews(repository_root, specimen_id)
+    if not candidates:
+        raise ReviewError(
+            f"no timeline review exists for specimen {specimen_id!r} under "
+            f"{reviews_dir(repository_root)}. Gate 4 is passed by a human checking events "
+            f"against audio: open the Timeline Observatory with "
+            f"`spectral-loom review-timeline {specimen_id}`, then record the verdict with "
+            f"`spectral-loom accept-timeline {specimen_id} ...`."
+        )
+    reviews = [(path, load_timeline_review(path)) for path in candidates]
+    for path, review in reviews:
+        if review.timeline_hash != timeline_hash:
+            continue
+        if not review.review.accepted:
+            raise ReviewError(
+                f"{path} records that {review.review.reviewer} spot-checked exactly this "
+                f"timeline on {review.review.reviewed_on} and did NOT accept it."
+            )
+        return review, path
+    reviewed = ", ".join(f"{r.timeline_hash} ({p.name})" for p, r in reviews)
+    raise ReviewError(
+        f"the timeline on disk for specimen {specimen_id!r} hashes to {timeline_hash}, which "
+        f"nobody has reviewed. Reviews exist for {reviewed}. A recompilation under a changed "
+        f"parameter is a different document and does not inherit a verdict."
+    )
+
+
+def build_timeline_review(
+    timeline: SongTimeline,
+    *,
+    timeline_path: str,
+    timeline_hash: str,
+    cache_key: str,
+    specimen_review_hash: str,
+    separation_review_hash: str,
+    event_counts: dict[str, dict[str, int]],
+    analysis_stages: list[str],
+    reviewer: str,
+    reviewed_on: date,
+    responses: dict[str, CriterionResponse],
+    notes: dict[str, str] | None = None,
+    accepted: bool,
+    method: str = GATE_4_METHOD,
+    purpose: str = GATE_4_PURPOSE,
+    summary: str | None = None,
+    findings: str | None = None,
+) -> TimelineReview:
+    """Bind a person's answers to the exact document they checked."""
+    missing = {c.id for c in GATE_4_CRITERIA} - set(responses)
+    if missing:
+        raise ReviewError(
+            f"every gate 4 criterion needs an answer; missing "
+            f"{', '.join(sorted(missing))}. A review with a question left blank is not a "
+            f"review, it is a partially examined assumption."
+        )
+    given = notes or {}
+    for identifier in given:
+        criterion(identifier, GATE_4_CRITERIA)
+
+    return TimelineReview(
+        specimen_id=timeline.specimen_id,
+        timeline_path=timeline_path,
+        timeline_hash=timeline_hash,
+        source_audio=timeline.source_audio,
+        separation_review_hash=separation_review_hash,
+        specimen_review_hash=specimen_review_hash,
+        cache_key=cache_key,
+        analysis=[p for p in timeline.provenance if p.stage in analysis_stages],
+        event_counts=event_counts,
+        review=HumanReview(
+            reviewer=reviewer,
+            reviewed_on=reviewed_on,
+            method=method,
+            criteria=[
+                ReviewCriterion(
+                    id=item.id,
+                    question=item.question,
+                    response=responses[item.id],
+                    notes=given.get(item.id),
+                )
+                for item in GATE_4_CRITERIA
+            ],
+            accepted=accepted,
+            purpose=purpose,
+            notes=summary,
+        ),
+        findings=findings,
     )

@@ -81,6 +81,9 @@ SEPARATION_SCHEMA_VERSION: Final = "0.1.0"
 SEPARATION_REVIEW_SCHEMA_ID: Final = "spectral-loom/separation-review"
 SEPARATION_REVIEW_SCHEMA_VERSION: Final = "0.1.0"
 
+TIMELINE_REVIEW_SCHEMA_ID: Final = "spectral-loom/timeline-review"
+TIMELINE_REVIEW_SCHEMA_VERSION: Final = "0.1.0"
+
 #: Slug-shaped stable identifier for a specimen. Stable across regeneration:
 #: it names the *intent*, while the audio hash names a particular rendering.
 SpecimenId = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{2,63}$")]
@@ -1006,5 +1009,102 @@ class SeparationReview(Contract):
                 f"the separator emits {self.separator.sources} and this review names only "
                 f"{sorted(outputs)}; {sorted(missing)} was not reviewed, and a partial audition "
                 f"must not be recorded as a verdict on the separation"
+            )
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Timeline review: what a human decided about one exact compiled timeline.
+# ---------------------------------------------------------------------------
+
+
+class TimelineReview(Contract):
+    """The tracked record that one human spot-checked one exact timeline.
+
+    The third of the same shape, for the third time the same argument applies.
+    A timeline is regenerable and untracked; the judgement about it is neither.
+    It is keyed by the timeline's **own sha256** rather than by the specimen id,
+    because recompiling under a changed parameter produces a different document
+    that would otherwise inherit a verdict nobody gave it — which is
+    ``decision:10`` one layer further along.
+
+    **What passing means is narrow and the contract says so.** Gate 4 asks
+    whether the events can be checked against the audio by a person, not whether
+    they are musically correct. A timeline can pass this gate while missing real
+    events and claiming unreal ones, provided the misses and the claims are
+    findable and have been written down. Accepting it licenses reading the
+    document; it licenses nothing about what the recording contains.
+
+    The reviewer's answers are perceptions of a *detector's output*, never
+    measurements of music. "Onsets were found that the detector declined" means
+    a person heard something the rule did not accept, and establishes nothing
+    about how many events the recording holds.
+    """
+
+    schema_id: Literal["spectral-loom/timeline-review"] = TIMELINE_REVIEW_SCHEMA_ID
+    schema_version: Literal["0.1.0"] = TIMELINE_REVIEW_SCHEMA_VERSION
+
+    specimen_id: SpecimenId
+    timeline_path: str = Field(min_length=1, max_length=512)
+    timeline_hash: ContentHash = Field(
+        description=(
+            "Hash of the compiled document itself. A recompilation under any changed parameter "
+            "is a different hash and does not inherit this acceptance."
+        )
+    )
+    source_audio: SourceAudio = Field(
+        description="The recording the timeline is about. Observed, and copied from it."
+    )
+
+    separation_review_hash: ContentHash = Field(
+        description="The gate 3 receipt the compile required. This gate stands on that one."
+    )
+    specimen_review_hash: ContentHash = Field(
+        description="The gate 2 receipt, carried so the whole chain of consent survives a clone."
+    )
+    cache_key: ContentHash = Field(
+        description="The compile's own key, so a later run can be compared against this one."
+    )
+
+    analysis: list[Provenance] = Field(
+        min_length=1,
+        description=(
+            "The analysis stages copied verbatim from the timeline, so the parameters this "
+            "verdict was given about survive without the untracked document being present."
+        ),
+    )
+    event_counts: dict[str, dict[str, int]] = Field(
+        description="Events by track and type at review time. Observed, and not a judgement."
+    )
+
+    review: HumanReview
+    findings: str | None = Field(
+        default=None,
+        max_length=200,
+        description=(
+            "Where the detailed findings live, if they were written down somewhere larger than "
+            "this document. A reference, because a verdict and its evidence are different "
+            "artifacts with different lifetimes."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _check_review(self) -> TimelineReview:
+        ids = [c.id for c in self.review.criteria]
+        repeated = {c for c in ids if ids.count(c) > 1}
+        if repeated:
+            raise ValueError(f"duplicate review criterion ids: {sorted(repeated)}")
+
+        stages = [p.stage for p in self.analysis]
+        duplicate = {s for s in stages if stages.count(s) > 1}
+        if duplicate:
+            raise ValueError(f"duplicate analysis stage names: {sorted(duplicate)}")
+
+        layers = {p.stage: p.truth_layer for p in self.analysis}
+        if TruthLayer.CORRECTED in layers.values():
+            raise ValueError(
+                "a timeline review records a human's judgement of a detector's output; a "
+                "`corrected` stage is a human overriding an inference, which is a different "
+                "act and belongs in a timeline rather than in a verdict about one"
             )
         return self

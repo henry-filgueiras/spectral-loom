@@ -12,6 +12,7 @@ Four commands. Three of them inspect and validate; one of them runs a model::
     spectral-loom accept-separation SPECIMEN --reviewer NAME --reviewed-on DATE ...
     spectral-loom compile SPECIMEN [--json] [--force]
     spectral-loom review-timeline SPECIMEN [--port N] [--no-open]
+    spectral-loom accept-timeline SPECIMEN --reviewer NAME --reviewed-on DATE ...
 
 ``generate`` and ``separate`` are expensive and need the cabinet environment.
 Neither downloads:
@@ -103,14 +104,18 @@ from spectral_loom.observatory import (
 from spectral_loom.review import (
     GATE_2_CRITERIA,
     GATE_3_CRITERIA,
+    GATE_4_CRITERIA,
     ReviewError,
     build_review,
     build_separation_review,
+    build_timeline_review,
     require_accepted,
     review_path,
     separation_review_path,
+    timeline_review_path,
     write_review,
     write_separation_review,
+    write_timeline_review,
 )
 from spectral_loom.separate import DERIVED_DIRNAME as SEPARATION_DERIVED
 from spectral_loom.separate import SEPARATION_DIRNAME, SEPARATION_MANIFEST_FILENAME, SeparationError
@@ -118,11 +123,15 @@ from spectral_loom.separate import load_manifest as load_separation
 from spectral_loom.separate import plan as plan_separation
 from spectral_loom.separate import run as run_separation
 from spectral_loom.timeline import (
+    INTERVAL_STAGE,
+    MEASURE_STAGE,
+    ONSET_STAGE,
     CompileError,
     CompilePlan,
     CompileReceipt,
     cache_miss_reason,
     compile_timeline,
+    event_counts,
     load_receipt,
     load_timeline,
 )
@@ -1584,6 +1593,140 @@ def _print_timeline_checklist(timeline: SongTimeline, receipt: CompileReceipt) -
 
 
 # ---------------------------------------------------------------------------
+# accept-timeline
+# ---------------------------------------------------------------------------
+
+
+def accept_timeline_command(
+    specimen_id: str,
+    *,
+    reviewer: str,
+    reviewed_on: date,
+    responses: dict[str, CriterionResponse],
+    notes: dict[str, str],
+    summary: str | None,
+    findings: str | None,
+    accepted: bool,
+    force: bool,
+    as_json: bool,
+    root: Path | None = None,
+) -> int:
+    """Write down what a human decided after checking a timeline against the audio.
+
+    Binds to the compiled document's own sha256, so a recompilation under any
+    changed parameter cannot inherit the verdict. Everything the compile
+    required is re-verified first: this cannot record a judgement about a
+    timeline that is no longer current for its inputs.
+    """
+    repo = find_repository_root(root or Path.cwd())
+    try:
+        prepared = plan_compile(specimen_id, repo)
+    except CompileError as exc:
+        return _report_failure(as_json, EXIT_BLOCKED, specimen_id, [str(exc)])
+
+    if not prepared.receipt_path.is_file():
+        return _report_failure(
+            as_json,
+            EXIT_BLOCKED,
+            specimen_id,
+            [f"no compiled timeline at {prepared.relative(prepared.timeline_path)}."],
+        )
+    try:
+        receipt = load_receipt(prepared.receipt_path)
+        stale = cache_miss_reason(prepared, receipt)
+        timeline = load_timeline(prepared.timeline_path)
+    except CompileError as exc:
+        return _report_failure(as_json, EXIT_BLOCKED, specimen_id, [str(exc)])
+    if stale is not None:
+        return _report_failure(
+            as_json,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                f"the timeline on disk is not current for these inputs: {stale}",
+                "A verdict is about a document. Recompile before recording one.",
+            ],
+        )
+
+    try:
+        review = build_timeline_review(
+            timeline,
+            timeline_path=prepared.relative(prepared.timeline_path),
+            timeline_hash=receipt.timeline_sha256,
+            cache_key=receipt.cache_key,
+            specimen_review_hash=receipt.specimen_review_hash,
+            separation_review_hash=receipt.separation_review_hash,
+            event_counts=event_counts(timeline),
+            analysis_stages=[MEASURE_STAGE, INTERVAL_STAGE, ONSET_STAGE],
+            reviewer=reviewer,
+            reviewed_on=reviewed_on,
+            responses=responses,
+            notes=notes,
+            accepted=accepted,
+            summary=summary,
+            findings=findings,
+        )
+    except (ReviewError, ValidationError) as exc:
+        return _report_failure(as_json, EXIT_INVALID, specimen_id, [str(exc)])
+
+    target = timeline_review_path(repo, specimen_id, receipt.timeline_sha256)
+    if target.exists() and not force:
+        return _report_failure(
+            as_json,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                f"{target} already records a review of exactly this timeline. Overwriting a "
+                f"recorded human judgement is a deliberate act; pass --force if that is what "
+                f"you mean."
+            ],
+        )
+    write_timeline_review(target, review)
+
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "specimen_id": specimen_id,
+                    "accepted": accepted,
+                    "review": str(target),
+                    "timeline_hash": review.timeline_hash,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return EXIT_OK
+
+    print(
+        f"{specimen_id}: timeline {'accepted' if accepted else 'REJECTED'} by {reviewer} "
+        f"on {reviewed_on}"
+    )
+    print(f"  timeline    {review.timeline_path}")
+    print(f"  sha256      {review.timeline_hash}")
+    print(f"  stands on   gate 3 {review.separation_review_hash}")
+    print(f"              gate 2 {review.specimen_review_hash}")
+    print(f"  review      {target}")
+    if review.findings:
+        print(f"  findings    {review.findings}")
+    print()
+    for item in review.review.criteria:
+        print(f"  {item.response.value:<8} {item.id}")
+        if item.notes:
+            print(f"           {item.notes}")
+    print()
+    if review.review.notes:
+        print(f"  {review.review.notes}")
+        print()
+    print(
+        review.review.purpose
+        if accepted
+        else "Nothing downstream reads a timeline a human rejected."
+    )
+    return EXIT_OK
+
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -1723,6 +1866,56 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     separate_parser.add_argument("--json", action="store_true", help="machine-readable output")
+
+    accept_timeline_parser = subparsers.add_parser(
+        "accept-timeline",
+        help="record a human's verdict on one exact compiled timeline",
+        description=(
+            "Writes a tracked review of the compiled timeline on disk, bound to its own sha256 "
+            "so a recompilation under any changed parameter cannot inherit it. Re-verifies "
+            "everything the compile required before recording anything. Every gate 4 criterion "
+            "must be answered; `unclear` exists so a reviewer who could not tell is not forced "
+            "to say no."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    accept_timeline_parser.add_argument("specimen_id")
+    accept_timeline_parser.add_argument("--reviewer", required=True, help="who checked it")
+    accept_timeline_parser.add_argument(
+        "--reviewed-on",
+        required=True,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="the day they checked it",
+    )
+    for item in GATE_4_CRITERIA:
+        accept_timeline_parser.add_argument(
+            item.flag,
+            required=True,
+            dest=_criterion_dest(item.id),
+            choices=[r.value for r in CriterionResponse],
+            help=item.help,
+        )
+    accept_timeline_parser.add_argument(
+        "--note",
+        action="append",
+        default=[],
+        metavar="CRITERION=TEXT",
+        help="qualify one criterion's answer; repeatable",
+    )
+    accept_timeline_parser.add_argument(
+        "--findings", help="where the detailed findings were written down"
+    )
+    accept_timeline_parser.add_argument("--summary", help="free prose")
+    accept_timeline_parser.add_argument(
+        "--reject", action="store_true", help="record a rejection rather than an acceptance"
+    )
+    accept_timeline_parser.add_argument(
+        "--force", action="store_true", help="overwrite an existing review of this timeline"
+    )
+    accept_timeline_parser.add_argument(
+        "--json", action="store_true", help="machine-readable output"
+    )
 
     review_timeline_parser = subparsers.add_parser(
         "review-timeline",
@@ -1898,6 +2091,27 @@ def main(argv: list[str] | None = None) -> int:
             },
             notes=notes,
             summary=args.summary,
+            accepted=not args.reject,
+            force=args.force,
+            as_json=args.json,
+        )
+
+    if args.command == "accept-timeline":
+        try:
+            notes = parse_notes(args.note)
+        except ReviewError as exc:
+            return _report_failure(args.json, EXIT_INVALID, args.specimen_id, [str(exc)])
+        return accept_timeline_command(
+            args.specimen_id,
+            reviewer=args.reviewer,
+            reviewed_on=args.reviewed_on,
+            responses={
+                item.id: CriterionResponse(getattr(args, _criterion_dest(item.id)))
+                for item in GATE_4_CRITERIA
+            },
+            notes=notes,
+            summary=args.summary,
+            findings=args.findings,
             accepted=not args.reject,
             force=args.force,
             as_json=args.json,

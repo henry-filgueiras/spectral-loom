@@ -70,30 +70,43 @@ accepted source offered no clearly audible cymbal or crash material to draw one 
 And a perceptually silent `vocals` output is **a failure to assign**, never evidence that nobody
 sang.
 
-## Gate 4 — A minimal timeline ⏳
+## Gate 4 — A minimal timeline ✅
 
-Compile a `song.timeline.json` from stem activity and onsets. Only `activity.sample`,
-`activity.interval`, and `onset`. Full provenance on every stage.
+Done. Henry spot-checked the compiled timeline against the audio on 2026-08-21, over two days, and
+accepted it with its limitations recorded rather than resolved.
 
-**Where it stands:** the compiler exists, refuses to run unless both human verdicts match the bytes
-on disk, and has been run once on the accepted separation — 0.3 s, no model, no cabinet, five
-provenance stages, 8 169 events across four tracks. Recompiling produced a byte-identical document
-with the same sha256, and a second invocation was a verified cache hit; corrupting the declared
-output or an input stem invalidated reuse loudly, with the reason named. The Timeline Observatory
-exists so a claim can be clicked and heard rather than read out of JSON. **Nobody has checked an
-event against the audio.** The gate is not passed by the document validating, and the counts below
-are descriptive rather than findings.
+**Evidence:** `corpus/reviews/sparse-funk-exposed-bass.47e0178cc5b9.timeline-review.json`, tracked,
+bound to the document's own sha256 so a recompilation under any changed parameter cannot inherit the
+verdict, and carrying the gate 3 and gate 2 receipts it stands on. The timeline validates, recompiles
+byte-identically — `sha256:47e0178c…c977c4`, confirmed by a forced recompile and a verified cache hit
+— and its 8169 events across four model outputs have been heard.
 
-Per model output, under one hysteresis rule at −50/−56 dBFS and one spectral-flux detector:
-`drums` 50 intervals and 153 onset hypotheses, `bass` 29 and 95, `other` 1 and 97, `vocals` **0 and
-0** — which means that detector claimed nothing about that output, and not that nobody sang.
-`archaeology/decisions/0011` records why every threshold is absolute; `archaeology/dragons/0004`
-records that one rule turned out to carry at least three different musical meanings.
+**What passing means is narrow, and the receipt says so:** this document is usable and attributable,
+and its mistakes are findable by a person. It is **not** accurate, and the eighteen findings in
+`archaeology/logs/0002` say exactly how it is not.
 
-**Passes when:** the timeline validates, its events are spot-checked against the audio by a human,
-and re-running the compiler on unchanged inputs hits cache and produces a byte-identical document.
-Two of the three are done; the middle one is Henry's.
+The detector's precision is good on both tracks examined closely: **one false positive in 95 `bass`
+onsets** — and the reviewer found the only one — and one flagged event in 153 on `drums`. Essentially
+every failure is a **recall** failure on quiet or dense material, and they all arise from one
+mechanism: *the adaptive term reads a busy neighbourhood as evidence that nothing in it is
+exceptional.* The clearest instance is a dense flourish after 39.5 s containing 19 novelty peaks and
+zero accepted onsets, at a level louder than the track's own median.
 
+Three things this gate established that were not known before it:
+
+- **`activity.interval` is the weakest part of the vocabulary and should not be built on.** Its count
+  on `bass` and `drums` is determined by where the 100 ms merge threshold falls in a continuous
+  distribution of gaps, with no plateau anywhere. See `archaeology/dragons/0004`.
+- **Cross-stem leakage is real and was confirmed by measurement**, not by coincidence: at 12.190 s the
+  `bass` and `drums` stems correlate at 0.969 below 300 Hz against a median of 0.092 elsewhere. Which
+  instrument the shared signal belongs to cannot be established from the stems, because both stems
+  are the separator's opinion. This is a *correct analysis of incorrect evidence* — a third failure
+  mode that no threshold fixes.
+- **The gate was passed by the instrument being good enough to argue with**, not by the detector
+  being right. The Timeline Observatory needed twelve rounds of change during the review, and two of
+  its bugs were findable only by opening a browser with the whole Python suite green.
+
+## Gate 5 — Note inference, optional
 ## Gate 5 — Note inference, optional
 
 Add Basic Pitch. Notes are an **additional** event type, never a required one: a timeline without
