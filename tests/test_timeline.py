@@ -616,3 +616,66 @@ def _rehash_repository(root: Path) -> None:
         accepted=True,
     )
     write_separation_review(separation_review_path(root, SPECIMEN, hash_bytes(payload)), review)
+
+
+# ---------------------------------------------------------------------------
+# The seven questions, and the one place the answers are split.
+# ---------------------------------------------------------------------------
+
+#: `docs/provenance.md`: an artifact whose provenance cannot answer all seven is
+#: not evidence of anything. Four of them are answerable from any stage in the
+#: document; the rest depend on whether the stage emitted a file of its own.
+ALWAYS_IN_THE_DOCUMENT = ("input_hashes", "tool_revision", "parameters", "truth_layer")
+
+
+def test_every_stage_answers_the_four_questions_that_do_not_move(tmp_path: Path) -> None:
+    timeline, _, _ = compiled(tmp_path)
+    for entry in timeline.provenance:
+        for field in ALWAYS_IN_THE_DOCUMENT:
+            assert getattr(entry, field), f"{entry.stage} cannot answer {field}"
+        assert entry.tool
+
+
+def test_the_analysis_stages_carry_no_clock_and_the_receipt_does(tmp_path: Path) -> None:
+    """The trade `docs/provenance.md` documents, asserted rather than described.
+
+    Questions 4 and 5 are omitted from the document because they are exactly the
+    fields that would make it differ between two runs of the same inputs — and,
+    for `runtime`, between two *machines*. Omitting it means a timeline is a
+    function of its inputs rather than of who ran it. The answers are not lost;
+    they are in the receipt.
+    """
+    timeline, receipt, _ = compiled(tmp_path)
+    analysis = [
+        p for p in timeline.provenance if p.stage in {MEASURE_STAGE, INTERVAL_STAGE, ONSET_STAGE}
+    ]
+    assert len(analysis) == 3
+    for entry in analysis:
+        assert entry.started_at is None
+        assert entry.duration_ms is None
+        assert entry.runtime is None
+        # Question 6 has no answer here: the stage emits events into the
+        # document, not a file, and a document cannot carry its own hash.
+        assert entry.output_hashes == {}
+
+    assert receipt.started_at is not None
+    assert receipt.duration_ms >= 0
+    assert receipt.runtime
+    assert receipt.timeline_sha256.startswith("sha256:")
+
+
+def test_the_copied_upstream_stages_still_answer_all_seven(tmp_path: Path) -> None:
+    """The exception is the analysis stages only; nothing else was weakened."""
+    timeline, _, _ = compiled(tmp_path)
+    for stage in ("generate", "separate"):
+        entry = next(p for p in timeline.provenance if p.stage == stage)
+        assert entry.runtime and entry.duration_ms is not None
+        assert entry.output_hashes, f"{stage} emitted files and must name their hashes"
+
+
+def test_the_receipt_records_both_human_verdicts_the_compile_required(tmp_path: Path) -> None:
+    """Where the authorisation trail lives, since it is not a provenance stage."""
+    _, receipt, prepared = compiled(tmp_path)
+    assert receipt.specimen_review_hash == prepared.specimen_review_hash
+    assert receipt.separation_review_hash == prepared.separation_review_hash
+    assert receipt.separation_manifest_hash == prepared.manifest_hash

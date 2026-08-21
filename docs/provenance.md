@@ -50,6 +50,40 @@ Field by field, against the seven questions:
   an earlier stage produced.
 - `truth_layer` answers (7). See [architecture.md](architecture.md).
 
+## The one exception, and where its answers live
+
+The three analysis stages inside a `song.timeline.json` — `activity.measure`,
+`activity.interval`, `onset.spectral_flux` — answer questions 1, 2, 3 and 7 in the document and
+deliberately do **not** answer 4, 5 and 6 there. This is the only exception in the project, and it
+is a trade rather than an oversight.
+
+**Questions 4 and 5 are omitted to buy something better than they give.** `started_at` and
+`duration_ms` are precisely the two fields that would make the document different every time it was
+produced from identical inputs, and gate 4 requires the opposite. `runtime` is omitted for a
+stronger reason: leaving it out means two people on different machines compiling the same accepted
+stems with the same parameters get **byte-identical documents**, so a timeline is a function of its
+inputs rather than of who ran it and can be verified by recomputation rather than by trust. That is
+worth more than knowing which laptop was warm.
+
+**Question 6 has no answer at this level at all.** An analysis stage emits no file of its own — it
+emits events *into* the document — and a document cannot contain its own hash.
+
+All three answers exist; they live in a **build receipt** written beside the timeline as
+`compile-receipt.json`. It records `started_at`, `duration_ms`, `runtime`, the timeline's own
+sha256, the cache key and everything the key was computed from, and both human reviews that had to
+match before the compile was allowed to start. The receipt names the timeline; the timeline does not
+name the receipt, because a path inside the document would be a claim about where a file was rather
+than what it contained.
+
+The receipt is deliberately **not** one of the published contracts under `schemas/`. That directory
+is the language-neutral surface another implementation reads; a local build record is not part of
+the compiler boundary and should not look like it is.
+
+The rule the seven questions state is unchanged: an artifact whose provenance cannot answer all
+seven is not evidence. What changed is where two of the answers are written down, and that split is
+mechanically enforced — `tests/test_timeline.py` asserts that every stage answers 1, 2, 3 and 7 in
+the document, that the analysis stages carry no clock, and that the receipt answers the rest.
+
 ## Provenance is the cache key
 
 These are not two mechanisms. A stage's cache key is the hash of its `input_hashes`, its `tool`,

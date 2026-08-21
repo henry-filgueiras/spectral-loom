@@ -19,7 +19,7 @@ name. Most of the tests below are about that question being asked properly.
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -80,6 +80,11 @@ def manifest(source_hash: str = SOURCE_HASH) -> GenerationManifest:
                 },
                 output_hashes={"source": source_hash},
                 runtime="cpython3.11 darwin-arm64 mps",
+                # A real generation stage answers all seven questions in
+                # `docs/provenance.md`, and a fixture that answered fewer would
+                # let a test pass against data the pipeline never produces.
+                started_at=datetime(2026, 8, 20, 22, 28, 31, tzinfo=UTC),
+                duration_ms=15651,
             )
         ],
     )
