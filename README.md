@@ -56,7 +56,7 @@ cd spectral-loom
 uv sync
 ```
 
-That installs eighteen packages and no model. The cabinet is optional and lives in its own
+That installs nineteen packages and no model. The cabinet is optional and lives in its own
 environment; nothing below needs it except `generate`.
 
 `./loom` is the entry point. There are two environments in this project and which one a command
