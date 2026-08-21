@@ -440,3 +440,42 @@ def test_the_payload_hands_the_page_relative_urls(tmp_path: Path) -> None:
         t["url"] for t in payload["tracks"]
     ]:
         assert "/" + relative in exhibit.files
+
+
+# ---------------------------------------------------------------------------
+# The click track.
+# ---------------------------------------------------------------------------
+
+
+def test_the_page_can_sonify_its_own_markers(tmp_path: Path) -> None:
+    """Judging a marker against an attack by eye asks for tens of milliseconds
+    of visual resolution against a waveform. Hearing it is how onset detection
+    has always actually been evaluated."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "click on events" in page
+    assert "CLICK_TONE" in page
+    assert "Sonify the markers" in page
+
+
+def test_the_click_track_mirrors_what_the_marker_lane_draws(tmp_path: Path) -> None:
+    """Three pitches, so which kind is sounding needs no glance at the screen."""
+    page = render(exhibit_for(tmp_path)[0])
+    for kind in ("accepted", "declined", "whatif"):
+        assert f"{kind}:" in page.split("CLICK_TONE")[1][:200], kind
+
+
+def test_the_click_lane_is_additive_rather_than_something_you_switch_to(
+    tmp_path: Path,
+) -> None:
+    """The whole point is hearing it over the selected output, not instead of it."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "The click lane is additive" in page
+    assert "if (id === CLICK_LANE) return;" in page
+
+
+def test_the_clicks_ride_the_same_transport_as_the_audio(tmp_path: Path) -> None:
+    """A separately scheduled click would have to re-derive loop wrapping and
+    would drift; a buffer started by the same call cannot."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "just another buffer on the same clock" in page
+    assert "CLICK_LANE = '__clicks__'" in page

@@ -164,6 +164,10 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
     <label class="opt">interval margin
       <input type="number" id="margin" value="250" step="50" min="0"> ms</label>
     <span class="sep"></span>
+    <label class="opt"><input type="checkbox" id="clicks"> <b>C</b>&nbsp;click on events</label>
+    <label class="opt">level <input type="range" id="clickLevel" min="0" max="100" value="45"
+      style="width:90px"></label>
+    <span class="sep"></span>
     <label class="opt"><input type="checkbox" id="candidates" checked> show declined peaks</label>
     <span class="sep"></span>
     <label class="opt"><input type="checkbox" id="hypo"> hypothetical activity thresholds</label>
@@ -290,7 +294,11 @@ const master = ctx.createGain();
 master.connect(ctx.destination);
 
 const gains = {}, buffers = {};
-const LANES = ['source'].concat(EXHIBIT.tracks.map(t => t.id));
+// Rendered clicks are just another buffer on the same clock. Scheduling them
+// against ctx.currentTime would have to re-derive loop wrapping and would drift;
+// a buffer started by the same `start(when, at)` call as the audio cannot.
+const CLICK_LANE = '__clicks__';
+const LANES = ['source'].concat(EXHIBIT.tracks.map(t => t.id)).concat([CLICK_LANE]);
 LANES.forEach(id => {
   const g = ctx.createGain();
   g.gain.value = 0;
@@ -320,7 +328,15 @@ function stopSources() {
 }
 function applyGains() {
   const now = ctx.currentTime;
-  LANES.forEach(id => gains[id].gain.setTargetAtTime(id === listenTo ? 1 : 0, now, 0.012));
+  // The click lane is additive, not one of the things you switch between: the
+  // whole point is hearing it *over* whichever output is selected.
+  LANES.forEach(id => {
+    if (id === CLICK_LANE) return;
+    gains[id].gain.setTargetAtTime(id === listenTo ? 1 : 0, now, 0.012);
+  });
+  const on = document.getElementById('clicks').checked;
+  const level = Number(document.getElementById('clickLevel').value) / 100;
+  gains[CLICK_LANE].gain.setTargetAtTime(on ? level * 0.5 : 0, now, 0.012);
   document.getElementById('listen').textContent =
     'listening: ' + (listeningToSource ? 'source mix' : shortName(selectedTrack));
   document.querySelectorAll('#tracks button').forEach(b => {
@@ -495,7 +511,9 @@ function refreshFloor() {
   document.getElementById('floorValue').value = currentFloor();
   if (!nov) { banner.style.display = 'none'; info.textContent = ''; return; }
 
+  const previous = hypoOnsets && hypoOnsets.length;
   hypoOnsets = floorIsCompiled() ? null : acceptAtFloor(nov, currentFloor());
+  if ((hypoOnsets && hypoOnsets.length) !== previous) refreshClicks();
 
   // The self-check: at the compiled floor the derivation must reproduce the
   // compiler's own accepted list, exactly, on every track.
@@ -995,6 +1013,65 @@ function pickAt(time, kind) {
   return false;
 }
 
+/* ---- the click track ------------------------------------------------------
+   Sonify the markers, because judging whether a marker sits on an attack by
+   *looking* at it asks a person to resolve tens of milliseconds by eye against
+   a waveform. Hearing a click land on the attack, or beside it, is the way
+   onset detection has always actually been evaluated.
+
+   What clicks is exactly what the marker lane draws: accepted onsets, declined
+   peaks when they are shown, and what-ifs when the floor is not the compiled
+   one. Three pitches, so which kind you are hearing needs no glance. */
+const CLICK_TONE = { accepted: 2400, declined: 950, whatif: 1550 };
+const CLICK_GAIN = { accepted: 1.0, declined: 0.5, whatif: 0.7 };
+let clickTimer = null;
+
+function clickEvents() {
+  const data = byTrack[selectedTrack];
+  if (!data) return [];
+  const out = data.onsets.map(e => [e.start_s, 'accepted']);
+  const nov = novelty && novelty.tracks[selectedTrack];
+  if (nov && document.getElementById('candidates').checked) {
+    nov.rejected.forEach(c => out.push([c.start_s, 'declined']));
+  }
+  if (hypoOnsets) {
+    const accepted = new Set(data.onsets.map(e => e.start_s));
+    hypoOnsets.forEach(o => {
+      if (!accepted.has(o.start_s)) out.push([o.start_s, 'whatif']);
+    });
+  }
+  return out;
+}
+
+function buildClicks() {
+  if (!duration || !byTrack[selectedTrack]) return;
+  const rate = ctx.sampleRate;
+  const buffer = ctx.createBuffer(1, Math.ceil((duration + 1) * rate), rate);
+  const data = buffer.getChannelData(0);
+  const length = Math.floor(0.010 * rate);
+  clickEvents().forEach(([time, kind]) => {
+    const at = Math.floor(time * rate);
+    const hz = CLICK_TONE[kind], amp = CLICK_GAIN[kind];
+    for (let i = 0; i < length && at + i < data.length; i++) {
+      // A short exponential ping: audible over a bass line, and short enough
+      // that its own onset is unambiguous.
+      data[at + i] += amp * Math.exp(-i / (length / 6)) * Math.sin(2 * Math.PI * hz * i / rate);
+    }
+  });
+  buffers[CLICK_LANE] = buffer;
+}
+
+function refreshClicks() {
+  // Debounced: the floor slider fires continuously while dragged, and swapping
+  // the buffer restarts playback.
+  clearTimeout(clickTimer);
+  clickTimer = setTimeout(() => {
+    buildClicks();
+    if (playing) start(position());
+    applyGains();
+  }, 180);
+}
+
 /* ---- the review notebook -------------------------------------------------
    In this browser tab and nowhere else. The page has no writer, and marking a
    claim must not become a way to acquire one: what accumulates here is a
@@ -1109,6 +1186,7 @@ function selectTrack(id) {
   applyGains();
   checkOverlayAgainstDocument();
   if (novelty) refreshFloor(); else redraw();
+  refreshClicks();
 }
 document.getElementById('play').onclick = toggle;
 document.getElementById('stop').onclick = () => { pause(); offset = 0; draw(); };
@@ -1122,7 +1200,11 @@ document.getElementById('nextInterval').onclick = () => step('interval', +1);
 document.getElementById('prevInterval').onclick = () => step('interval', -1);
 document.getElementById('nextCandidate').onclick = () => step('candidate', +1);
 document.getElementById('prevCandidate').onclick = () => step('candidate', -1);
-document.getElementById('candidates').addEventListener('input', redraw);
+document.getElementById('candidates').addEventListener('input', () => {
+  redraw(); refreshClicks();
+});
+document.getElementById('clicks').addEventListener('input', applyGains);
+document.getElementById('clickLevel').addEventListener('input', applyGains);
 document.getElementById('floor').addEventListener('input', refreshFloor);
 document.getElementById('floorValue').addEventListener('input', () => {
   document.getElementById('floor').value = document.getElementById('floorValue').value;
@@ -1222,6 +1304,12 @@ window.addEventListener('keydown', e => {
   if (k === 'r') { step('candidate', +1); return; }
   if (k === 'R') { step('candidate', -1); return; }
   if (k === 'm' || k === 'M') { addMark(); return; }
+  if (k === 'c' || k === 'C') {
+    const box = document.getElementById('clicks');
+    box.checked = !box.checked;
+    applyGains();
+    return;
+  }
   if (k === 'N') { step('onset', -1); return; }
   if (k === 'Enter') { audition(); return; }
   if (k === '[') { loop.a = position(); normaliseLoop(); return; }
@@ -1288,6 +1376,7 @@ const status = document.getElementById('status');
     timeline.tracks.map(t => `${t.id.split('.').pop()} ` +
       `${t.events.filter(e => e.type === 'onset').length}`).join(' · ');
   renderMarks();
+  buildClicks();
   status.style.display = 'none';
   selectTrack(selectedTrack);
   refreshFloor();
