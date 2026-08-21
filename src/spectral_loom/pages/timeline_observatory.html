@@ -109,6 +109,15 @@ input[type=range] { vertical-align: middle; accent-color: var(--hypo); }
   border-left: 1px solid rgba(111,208,192,.55); border-right: 1px solid rgba(111,208,192,.55);
   display: none;
 }
+/* A mark, drawn across every lane, so that a claim already looked at is not
+   looked at twice. Positioned rather than rebuilt on each frame: marks change
+   rarely and the view changes often. */
+#markmarks { position: absolute; top: 0; bottom: 0; left: 0; right: 0; }
+#markmarks div {
+  position: absolute; top: 0; bottom: 0; width: 0;
+  border-left: 1px dashed rgba(127,209,138,.85);
+}
+#markmarks div.elsewhere { border-left-color: rgba(127,209,138,.28); }
 #loopin-mark {
   position: absolute; top: 0; bottom: 0; width: 0;
   border-left: 1px dashed rgba(111,208,192,.8); display: none;
@@ -278,7 +287,7 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
       </div>
       <div class="wave"><canvas data-canvas="onsets" height="80"></canvas></div>
     </div>
-    <div id="overlay"><div id="loop"></div><div id="dragsel"></div><div id="loopin-mark"></div><div id="playhead"></div></div>
+    <div id="overlay"><div id="loop"></div><div id="dragsel"></div><div id="markmarks"></div><div id="loopin-mark"></div><div id="playhead"></div></div>
     <div id="hit"></div>
   </div>
 
@@ -917,6 +926,7 @@ function draw() {
     el.style.left = `${xOf(loop.a, w)}px`;
     el.style.width = `${Math.max(1, xOf(loop.b, w) - xOf(loop.a, w))}px`;
   } else el.style.display = 'none';
+  positionMarkLines(w);
   const sel = document.getElementById('dragsel');
   if (drag && drag.moved && drag.to !== null) {
     const a = Math.min(drag.from, drag.to), b = Math.max(drag.from, drag.to);
@@ -1247,6 +1257,21 @@ function addMark() {
   const field = document.querySelector(`input.note[data-note="${index}"]`);
   if (field) { field.focus(); field.scrollIntoView({ block: 'nearest' }); }
 }
+function renderMarkLines() {
+  const host = document.getElementById('markmarks');
+  host.innerHTML = marks.map(m =>
+    `<div data-t="${m.t}" class="${m.track === selectedTrack ? '' : 'elsewhere'}"></div>`).join('');
+  draw();
+}
+function positionMarkLines(w) {
+  const host = document.getElementById('markmarks');
+  for (const el of host.children) {
+    const x = xOf(Number(el.dataset.t), w);
+    if (x < -1 || x > w + 1) { el.style.display = 'none'; continue; }
+    el.style.display = 'block';
+    el.style.left = `${x}px`;
+  }
+}
 function renderMarks() {
   document.getElementById('markCount').textContent = marks.length ? `(${marks.length})` : '';
   const list = document.getElementById('markList');
@@ -1268,6 +1293,7 @@ function renderMarks() {
     el.oninput = () => { marks[Number(el.dataset.note)].note = el.value; };
     el.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === 'Escape') el.blur(); };
   });
+  renderMarkLines();
 }
 function marksAsText() {
   const head = [
@@ -1333,6 +1359,7 @@ function selectTrack(id) {
   checkOverlayAgainstDocument();
   if (novelty) refreshFloor(); else redraw();
   refreshClicks();
+  renderMarkLines();
 }
 document.getElementById('play').onclick = toggle;
 document.getElementById('stop').onclick = () => { pause(); offset = 0; draw(); };
@@ -1556,6 +1583,19 @@ function setLoopOut() {
   if (loop.b < loop.a) { const t = loop.a; loop.a = loop.b; loop.b = t; }
   restart();
 }
+/* A control that keeps focus after being used swallows the shortcuts: space
+   toggles the checkbox you just clicked instead of starting playback. Focus is
+   handed back after any click *except* on a field you type into, where the
+   space bar means a space. */
+document.addEventListener('click', () => {
+  setTimeout(() => {
+    const el = document.activeElement;
+    if (!el || el === document.body) return;
+    const typed = el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number');
+    if (!typed) el.blur();
+  }, 0);
+});
+
 let resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);

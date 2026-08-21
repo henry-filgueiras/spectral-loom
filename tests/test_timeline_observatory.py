@@ -636,3 +636,30 @@ def test_the_overlay_is_clipped(tmp_path: Path) -> None:
     page = render(exhibit_for(tmp_path)[0])
     assert "#overlay { z-index: 3; overflow: hidden; }" in page
     assert "run out across the" in page
+
+
+def test_a_control_hands_focus_back_after_it_is_used(tmp_path: Path) -> None:
+    """A focused checkbox swallows the space bar, so play/pause stops working."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "swallows the shortcuts" in page
+    assert "if (!typed) el.blur();" in page
+
+
+def test_a_field_you_type_into_keeps_focus(tmp_path: Path) -> None:
+    """Where the space bar means a space."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "el.type === 'text' || el.type === 'number'" in page
+
+
+def test_a_mark_is_drawn_across_every_lane(tmp_path: Path) -> None:
+    """So a claim already looked at is not looked at twice."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "markmarks" in page
+    assert "is not\n   looked at twice" in page
+    assert "function positionMarkLines" in page
+
+
+def test_mark_lines_are_positioned_rather_than_rebuilt_each_frame(tmp_path: Path) -> None:
+    page = render(exhibit_for(tmp_path)[0])
+    assert "marks change\n   rarely and the view changes often" in page
+    assert "elsewhere" in page
