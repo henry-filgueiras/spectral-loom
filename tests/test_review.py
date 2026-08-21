@@ -164,7 +164,7 @@ def test_every_criterion_must_be_answered() -> None:
 
 
 def test_a_note_for_an_unknown_criterion_is_a_typo_not_a_new_question() -> None:
-    with pytest.raises(ReviewError, match="no gate 2 criterion"):
+    with pytest.raises(ReviewError, match="no criterion named"):
         review(notes={"bass-is-nice": "it is"})
 
 

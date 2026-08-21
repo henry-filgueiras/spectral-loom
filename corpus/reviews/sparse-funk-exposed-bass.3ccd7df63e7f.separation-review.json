@@ -1,0 +1,176 @@
+{
+  "review": {
+    "accepted": true,
+    "criteria": [
+      {
+        "id": "bass-clearly-isolated",
+        "notes": "Clearly isolated, with very little leakage.",
+        "question": "Is the bass line clearly isolated in the `bass` output?",
+        "response": "yes"
+      },
+      {
+        "id": "bass-leakage-perceived",
+        "notes": "Very little leakage overall. A possible slight kick-drum leak was heard, subtle enough that it could equally be a muted bass note; the reviewer could not tell which, hence unclear rather than yes or no.",
+        "question": "Was leakage from another part perceived in the `bass` output?",
+        "response": "unclear"
+      },
+      {
+        "id": "bass-material-missing-or-smeared",
+        "notes": "No meaningful disappearance of the bass line was noticed, and no objectionable smearing.",
+        "question": "Did bass material perceptibly disappear, or were its attacks smeared, in the `bass` output?",
+        "response": "no"
+      },
+      {
+        "id": "drums-kick-snare-hat-coherent",
+        "notes": "Kick clear, snare/rimshot clear, hi-hats clear.",
+        "question": "Is the kick, snare/rimshot and hi-hat material coherent in the `drums` output?",
+        "response": "yes"
+      },
+      {
+        "id": "drums-cymbal-material-sufficient-to-judge",
+        "notes": "No clearly audible cymbal or crash material was heard. This records that the accepted source did not offer material from which a cymbal-separation verdict could be drawn. It is NOT a finding that the separator failed to separate cymbals; that conclusion is unavailable from this evidence.",
+        "question": "Was there enough clearly audible cymbal or crash material in the accepted source to judge cymbal separation at all?",
+        "response": "no"
+      },
+      {
+        "id": "drums-melodic-leakage-or-damaged-transients",
+        "notes": "No obvious melodic leakage and no damaged transients were perceived.",
+        "question": "Was melodic leakage or transient damage perceived in the `drums` output?",
+        "response": "no"
+      },
+      {
+        "id": "other-single-instrument",
+        "notes": "Clean guitar material is clearly present, but multiple musical and timbral voices appear to remain lumped together. The reviewer suspects more than one guitar-like part and possibly a further synth-like timbre; those are suspicions and are deliberately not recorded as instrument observations. The operative conclusion is that this output is useful as an HTDemucs output and is not a single-instrument stem, so it must not be renamed after an instrument.",
+        "question": "Does the `other` output present as a single instrument?",
+        "response": "no"
+      },
+      {
+        "id": "other-bass-or-drums-misassigned",
+        "notes": "Bass and drums are fairly effectively excluded from this output.",
+        "question": "Is substantial bass or drum content assigned to the `other` output?",
+        "response": "no"
+      },
+      {
+        "id": "vocals-meaningful-content-perceived",
+        "notes": "Perceptually silent. No voice-like material was heard, and no meaningful guitar or other instrument assignment was noticed. This records what was perceived in a model output; it is not the statement that the source objectively contained no vocals.",
+        "question": "Was any perceptually meaningful content \u2014 voice-like or instrumental \u2014 heard in the `vocals` output?",
+        "response": "no"
+      },
+      {
+        "id": "whole-character-retained",
+        "notes": "The reconstructed mix retains the source overall musical character.",
+        "question": "Does the reconstructed mix retain the source's overall musical character?",
+        "response": "yes"
+      },
+      {
+        "id": "whole-objectionable-artifacts",
+        "notes": "No obvious phase destruction, pumping, or missing musical material was perceived.",
+        "question": "Was obvious phase destruction, pumping, or missing musical material perceived in the reconstruction?",
+        "response": "no"
+      },
+      {
+        "id": "whole-level-difference-perceived",
+        "notes": "The reconstruction was perceived as somewhat lower in overall volume than the original. Preserved as the perceptual observation it is, rather than corrected away by a numerical signal metric, which would answer a different question than the one the reviewer was asked.",
+        "question": "Was the reconstruction perceived as differing in overall level from the source?",
+        "response": "yes"
+      },
+      {
+        "id": "fit-as-evidence-for-activity-and-onset-inference",
+        "notes": "Good enough to serve as evidence for experimental activity and onset inference.",
+        "question": "Are these outputs good enough to serve as evidence inputs for experimental activity and onset inference?",
+        "response": "yes"
+      }
+    ],
+    "method": "Auditioned every model output and the engineering diagnostics in the Stem Observatory, on one shared transport clock, with solo, mute, loop and A/B against the source mix. Unaided ears. No measurement beyond the hashes, durations, rates, channel counts, peaks and residual levels the separation manifest already recorded.",
+    "notes": "Accepted as evidence inputs for experimental activity and onset inference. What was established is what a listener perceived in four model outputs and their sum on 2026-08-20; nothing here was measured, and nothing here establishes what the source recording contains. The two cases where the distinction does the most work are recorded explicitly: no cymbal verdict is drawn because the source offered no clearly audible cymbal material to draw one from, and the vocals output being perceptually silent is a failure to assign rather than evidence that nobody sang.",
+    "purpose": "These exact separated bytes are fit to serve as evidence inputs for experimental activity and onset inference. This is not a claim that any output is a verified instrument, and it is not a claim that anything absent from an output is absent from the recording: an output in which nothing was perceived is a failure to assign, never proof that nobody played.",
+    "reviewed_on": "2026-08-20",
+    "reviewer": "Henry"
+  },
+  "reviewed_artifacts": [
+    {
+      "hash": "sha256:8ff73623a29d213b0732296c5dfbff1aa8908fc2a78647b14ed754209b9aa628",
+      "kind": "source",
+      "name": "source",
+      "path": "corpus/generated/sparse-funk-exposed-bass/source.wav"
+    },
+    {
+      "hash": "sha256:533be3f197852d7a4b546c66e383a6f743b84bdda1f72bb2c1822a39820f2b0f",
+      "kind": "model_output",
+      "name": "drums",
+      "path": "corpus/derived/sparse-funk-exposed-bass/separation/drums.wav"
+    },
+    {
+      "hash": "sha256:0b64d1ef4f3f5c439122ed8c210f76fac8be1c7f110e4046005b77096f0b8126",
+      "kind": "model_output",
+      "name": "bass",
+      "path": "corpus/derived/sparse-funk-exposed-bass/separation/bass.wav"
+    },
+    {
+      "hash": "sha256:19de0df1ea4f8ef4edf17e75f7b6ee9ace908f0f496dc7bb5d663d4c127041c5",
+      "kind": "model_output",
+      "name": "other",
+      "path": "corpus/derived/sparse-funk-exposed-bass/separation/other.wav"
+    },
+    {
+      "hash": "sha256:e4353ec05c8370ad0ed7ed44b3a8086214c492ed3ad2db2bd6c4aee6e2e4d082",
+      "kind": "model_output",
+      "name": "vocals",
+      "path": "corpus/derived/sparse-funk-exposed-bass/separation/vocals.wav"
+    },
+    {
+      "hash": "sha256:e36bab5f108b5b9507e71a3bb494c08632c9a7fb2690416cbd66adc554d31e97",
+      "kind": "diagnostic",
+      "name": "reconstruction",
+      "path": "corpus/derived/sparse-funk-exposed-bass/separation/diagnostics/reconstruction.wav"
+    },
+    {
+      "hash": "sha256:ad073aa6b3585890888527be123afbd8a6438d2f3135e506a13de714f79659f8",
+      "kind": "diagnostic",
+      "name": "residual",
+      "path": "corpus/derived/sparse-funk-exposed-bass/separation/diagnostics/residual.wav"
+    }
+  ],
+  "schema_id": "spectral-loom/separation-review",
+  "schema_version": "0.1.0",
+  "separation_cache_key": "sha256:504ed36f4e4107578d3af1ea954ce01e026780b6bee609fde9e16f7415af350e",
+  "separation_manifest_hash": "sha256:3ccd7df63e7f5209a9b20ea5765c5497ec2fa0aed9027540b7ee3221b449cf3f",
+  "separation_manifest_path": "corpus/derived/sparse-funk-exposed-bass/separation/separation-manifest.json",
+  "separator": {
+    "adapter": "demucs",
+    "applied_with": "demucs.apply.apply_model",
+    "code_distribution": "demucs",
+    "code_sha256": "4916a804702033ce934a6cdfa7e38dde03f7a7a6e85f41d0120eefe9e2966758",
+    "code_version": "4.1.0",
+    "loaded_with": "demucs.hf.load_safetensors_model",
+    "model_audio_channels": 2,
+    "model_sample_rate_hz": 44100,
+    "model_signatures": [
+      "955717e8"
+    ],
+    "sources": [
+      "drums",
+      "bass",
+      "other",
+      "vocals"
+    ],
+    "weights_repo": "adefossez/HTDemucs",
+    "weights_revision": "bf35a81b663819a8255c8fefee17f9d812b786b5",
+    "weights_variant": "htdemucs"
+  },
+  "source_audio": {
+    "channels": 2,
+    "duration_s": 45.0,
+    "hash": "sha256:8ff73623a29d213b0732296c5dfbff1aa8908fc2a78647b14ed754209b9aa628",
+    "sample_rate_hz": 48000
+  },
+  "specimen_id": "sparse-funk-exposed-bass",
+  "specimen_review_hash": "sha256:0308123e6345b1373154e5d75b59d878251941cc136da4f6b86c38c362a3762b",
+  "supplementary": [
+    {
+      "listener": "Lux (ChatGPT)",
+      "nature": "A second-listener assessment reported to this project by the reviewer. This project did not observe how it was produced and does not treat it as an audition it can verify. Context only; Henry is the gate 3 authority.",
+      "summary": "Aligned with the reviewer: bass isolation strong, possible kick and bass ambiguity minor, drums coherent, the other output clearly containing multiple unresolved musical voices, the vocals output containing no perceptually meaningful voice-like material, and reconstruction artifacts not objectionable."
+    }
+  ]
+}

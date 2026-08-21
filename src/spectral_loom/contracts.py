@@ -1,6 +1,6 @@
 """Versioned data contracts for the Spectral Loom compiler boundary.
 
-Three documents matter, and they are deliberately small:
+Six documents, and they are deliberately small:
 
 ``SongSpec``
     What was *asked for*. A specification is authored before any audio exists,
@@ -33,7 +33,13 @@ Three documents matter, and they are deliberately small:
     a program. It is keyed by the audio's hash, because a specimen id names an
     intent and two renderings of one intent are two different recordings.
 
-All three carry an explicit ``schema_id`` and ``schema_version``. The version is a
+``SeparationReview``
+    What a human decided about one exact separation after listening to it. The
+    same argument one layer down: a separation lives in a directory the next run
+    will reuse, so the acceptance is bound to the separation manifest's own
+    content hash and to every artifact in the exhibit, each by hash.
+
+All six carry an explicit ``schema_id`` and ``schema_version``. The version is a
 ``Literal``, on purpose: bumping it is a code change with a reviewable diff and
 a regenerated JSON Schema, rather than a string that silently drifts. Documents
 on disk outlive the code that wrote them, so a field may gain meaning additively
@@ -71,6 +77,9 @@ REVIEW_SCHEMA_VERSION: Final = "0.1.0"
 
 SEPARATION_SCHEMA_ID: Final = "spectral-loom/separation-manifest"
 SEPARATION_SCHEMA_VERSION: Final = "0.1.0"
+
+SEPARATION_REVIEW_SCHEMA_ID: Final = "spectral-loom/separation-review"
+SEPARATION_REVIEW_SCHEMA_VERSION: Final = "0.1.0"
 
 #: Slug-shaped stable identifier for a specimen. Stable across regeneration:
 #: it names the *intent*, while the audio hash names a particular rendering.
@@ -847,4 +856,155 @@ class SeparationManifest(Contract):
         collisions = {p for p in paths if paths.count(p) > 1}
         if collisions:
             raise ValueError(f"two artifacts claim the same path: {sorted(collisions)}")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Separation review: what a human decided about one exact separation.
+# ---------------------------------------------------------------------------
+
+
+class ReviewedArtifact(Contract):
+    """One file that was actually in the exhibit a reviewer listened to.
+
+    A verdict about "the separation" is worth nothing unless the separation can
+    be identified. A directory can be regenerated under a different revision, a
+    different backend, or a different parameter and still answer to the same
+    name, so the acceptance names **every file by hash**: a later run whose
+    bytes differ is a different separation and inherits nothing.
+
+    ``kind`` keeps the same distinction the separation manifest keeps.
+    ``model_output`` is an assignment HTDemucs made; ``diagnostic`` is
+    arithmetic performed on those assignments and carries no model opinion;
+    ``source`` is the evidence they are all claims about.
+    """
+
+    name: Slug = Field(description="The artifact's own name, e.g. 'bass' or 'residual'.")
+    kind: Literal["source", "model_output", "diagnostic"]
+    path: str = Field(
+        min_length=1,
+        max_length=512,
+        description="Where it was when it was reviewed. A claim about where, not what.",
+    )
+    hash: ContentHash = Field(description="The bytes that were actually heard.")
+
+
+class SupplementaryListening(Contract):
+    """A second opinion that is context, not a reviewer.
+
+    Recorded because leaving it out would misrepresent how the judgement was
+    reached, and typed separately from :class:`HumanReview` because a review has
+    exactly one author and this is not it. Nothing mechanical reads this field,
+    and no downstream stage may treat it as an acceptance.
+    """
+
+    listener: str = Field(min_length=1, max_length=200, description="Who, or what, assessed it.")
+    nature: str = Field(
+        min_length=1,
+        max_length=500,
+        description=(
+            "What kind of assessment this is and how this project came by it, in enough detail "
+            "that a reader does not have to assume it was produced the same way the reviewer's "
+            "was."
+        ),
+    )
+    summary: str = Field(
+        min_length=1, max_length=2000, description="What it said, as reported to this project."
+    )
+
+
+class SeparationReview(Contract):
+    """The tracked record that one human judged one exact separation.
+
+    The layer below :class:`SpecimenReview`, and it exists for the same reason.
+    ``decision:10`` established that a specimen id names an *intent* and cannot
+    stand in for the bytes a person heard. A separation is one step worse: it is
+    identified by a directory that will be reused by the next run, so
+    `corpus/derived/<specimen>/separation/` can be regenerated on another
+    backend, at another revision, or with another parameter and still resolve —
+    to stems nobody has heard. This document therefore names the separation
+    manifest's own content hash, the separator's exact code and weight identity,
+    and every artifact that was in the exhibit, each by hash.
+
+    **The human judgement is still not a truth layer.** "These stems are fit to
+    be evidence inputs for activity and onset inference" is a claim about the
+    project, not about the recording, exactly as in ``decision:10``. What the
+    reviewer perceived in a model output is a fact about their perception of a
+    model's assignment, and never a fact about what the source contained: an
+    output in which nothing meaningful was heard is a failure to assign, and the
+    contract will not let that be written down as an absence in the music.
+    """
+
+    schema_id: Literal["spectral-loom/separation-review"] = SEPARATION_REVIEW_SCHEMA_ID
+    schema_version: Literal["0.1.0"] = SEPARATION_REVIEW_SCHEMA_VERSION
+
+    specimen_id: SpecimenId
+    source_audio: SourceAudio = Field(
+        description="The accepted source these stems were separated from. Observed."
+    )
+    specimen_review_hash: ContentHash = Field(
+        description=(
+            "Hash of the gate 2 review that accepted the source. A separation of unaccepted "
+            "bytes could never have been produced, and this is the receipt for that."
+        )
+    )
+
+    separation_manifest_path: str = Field(min_length=1, max_length=512)
+    separation_manifest_hash: ContentHash = Field(
+        description=(
+            "Hash of the separation manifest document itself, which is this separation's "
+            "identity. A regenerated separation is a different manifest and a different hash, "
+            "and it does not inherit this acceptance."
+        )
+    )
+    separation_cache_key: ContentHash = Field(
+        description="The manifest's own cache key, copied so the two can be compared later."
+    )
+
+    separator: Separator = Field(
+        description=(
+            "Which implementation loaded which weights, copied verbatim so the reviewed "
+            "separation stays attributable from a clean clone where the manifest is absent."
+        )
+    )
+
+    reviewed_artifacts: list[ReviewedArtifact] = Field(
+        min_length=1,
+        description="Every file in the exhibit that was listened to, each named by its hash.",
+    )
+
+    review: HumanReview
+    supplementary: list[SupplementaryListening] = Field(
+        default_factory=list,
+        description=(
+            "Second opinions, recorded as context. `review` has exactly one author and these "
+            "are not it; nothing mechanical reads them."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _check_review(self) -> SeparationReview:
+        ids = [c.id for c in self.review.criteria]
+        repeated = {c for c in ids if ids.count(c) > 1}
+        if repeated:
+            raise ValueError(f"duplicate review criterion ids: {sorted(repeated)}")
+
+        names = [(a.kind, a.name) for a in self.reviewed_artifacts]
+        collisions = {n for n in names if names.count(n) > 1}
+        if collisions:
+            raise ValueError(f"two reviewed artifacts share a name: {sorted(collisions)}")
+
+        outputs = {a.name for a in self.reviewed_artifacts if a.kind == "model_output"}
+        if not outputs:
+            raise ValueError(
+                "a separation review must name at least one model output; a review of only "
+                "diagnostics is a review of arithmetic, not of a separation"
+            )
+        missing = set(self.separator.sources) - outputs
+        if missing:
+            raise ValueError(
+                f"the separator emits {self.separator.sources} and this review names only "
+                f"{sorted(outputs)}; {sorted(missing)} was not reviewed, and a partial audition "
+                f"must not be recorded as a verdict on the separation"
+            )
         return self

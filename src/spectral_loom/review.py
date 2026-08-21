@@ -7,6 +7,12 @@ plus a person's answers, and — the part every later stage depends on — how a
 stage asks "were *these* bytes accepted" and gets an answer that cannot be
 satisfied by a directory name.
 
+Two kinds of review live here, because they are the same problem twice. A
+:class:`~spectral_loom.contracts.SpecimenReview` is keyed by the audio's hash; a
+:class:`~spectral_loom.contracts.SeparationReview` is keyed by the separation
+manifest's hash. They share the human-review primitive the contracts already
+define and nothing else, which is as much generalization as two cases earn.
+
 That last point is the whole reason this module exists rather than being three
 lines inside a command. `corpus/generated/sparse-funk-exposed-bass/source.wav`
 is a path. `sparse-funk-exposed-bass` is a *specimen id*, which names an intent
@@ -39,7 +45,11 @@ from spectral_loom.contracts import (
     GenerationManifest,
     HumanReview,
     ReviewCriterion,
+    ReviewedArtifact,
+    SeparationManifest,
+    SeparationReview,
     SpecimenReview,
+    SupplementaryListening,
 )
 from spectral_loom.hashing import hash_bytes
 
@@ -131,14 +141,14 @@ GATE_2_METHOD = (
 )
 
 
-def criterion(identifier: str) -> Criterion:
-    """Look up a gate 2 criterion, failing with the ids that do exist."""
-    for item in GATE_2_CRITERIA:
+def criterion(identifier: str, criteria: tuple[Criterion, ...] = GATE_2_CRITERIA) -> Criterion:
+    """Look up a criterion in a question set, failing with the ids that do exist."""
+    for item in criteria:
         if item.id == identifier:
             return item
     raise ReviewError(
-        f"no gate 2 criterion named {identifier!r}; the question set is "
-        f"{', '.join(c.id for c in GATE_2_CRITERIA)}"
+        f"no criterion named {identifier!r} in this question set; it is "
+        f"{', '.join(c.id for c in criteria)}"
     )
 
 
@@ -304,4 +314,337 @@ def require_accepted(
         f"has reviewed. Reviews exist for {reviewed}. A specimen id names an intent and "
         f"survives regeneration, so a matching directory name is not evidence that these "
         f"bytes are the ones a person listened to — and this stage will not treat it as such."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The gate 3 question set: what a human decided about one exact separation.
+# ---------------------------------------------------------------------------
+
+#: What gate 3 asks about a separation, per model output and then as a whole.
+#:
+#: Every wording here is load-bearing, because the easiest way to ruin this gate
+#: is to ask a question whose answer is a claim about the recording. "Was there
+#: enough clearly audible cymbal material to judge cymbal separation" can be
+#: answered honestly; "did the separator lose the cymbals" cannot, if nobody can
+#: say what was there to lose. Likewise `vocals` is asked about what was
+#: *perceived in the model output*, never about what the source contained.
+#:
+#: As with gate 2, each answer is written down with the question's exact wording,
+#: so editing this constant later cannot retroactively change what an existing
+#: review claims.
+GATE_3_CRITERIA: tuple[Criterion, ...] = (
+    Criterion(
+        id="bass-clearly-isolated",
+        flag="--bass-isolated",
+        question="Is the bass line clearly isolated in the `bass` output?",
+        help="whether a bass line can be followed on its own in that output",
+    ),
+    Criterion(
+        id="bass-leakage-perceived",
+        flag="--bass-leakage",
+        question="Was leakage from another part perceived in the `bass` output?",
+        help="whether anything that does not belong to a bass line was heard in it",
+    ),
+    Criterion(
+        id="bass-material-missing-or-smeared",
+        flag="--bass-damaged",
+        question=(
+            "Did bass material perceptibly disappear, or were its attacks smeared, in the "
+            "`bass` output?"
+        ),
+        help="whether the separation dropped or blurred material the reviewer expected to hear",
+    ),
+    Criterion(
+        id="drums-kick-snare-hat-coherent",
+        flag="--drums-coherent",
+        question="Is the kick, snare/rimshot and hi-hat material coherent in the `drums` output?",
+        help="whether those elements are intact and followable in that output",
+    ),
+    Criterion(
+        id="drums-cymbal-material-sufficient-to-judge",
+        flag="--drums-cymbal-judgeable",
+        question=(
+            "Was there enough clearly audible cymbal or crash material in the accepted source "
+            "to judge cymbal separation at all?"
+        ),
+        help=(
+            "whether the source offered material from which a cymbal verdict could be drawn; "
+            "'no' records that the question is unanswerable here, not that the model failed"
+        ),
+    ),
+    Criterion(
+        id="drums-melodic-leakage-or-damaged-transients",
+        flag="--drums-damaged",
+        question=("Was melodic leakage or transient damage perceived in the `drums` output?"),
+        help="whether pitched material leaked in, or attacks were damaged",
+    ),
+    Criterion(
+        id="other-single-instrument",
+        flag="--other-single-instrument",
+        question="Does the `other` output present as a single instrument?",
+        help=(
+            "whether that output is one voice or several lumped together; 'no' is the answer "
+            "that forbids renaming it after an instrument"
+        ),
+    ),
+    Criterion(
+        id="other-bass-or-drums-misassigned",
+        flag="--other-misassigned",
+        question="Is substantial bass or drum content assigned to the `other` output?",
+        help="whether the separator put material there that its own bass and drums outputs claim",
+    ),
+    Criterion(
+        id="vocals-meaningful-content-perceived",
+        flag="--vocals-content",
+        question=(
+            "Was any perceptually meaningful content — voice-like or instrumental — heard in "
+            "the `vocals` output?"
+        ),
+        help=(
+            "what was perceived in that model output; 'no' is a failure to assign and is never "
+            "evidence that the source contained no singing"
+        ),
+    ),
+    Criterion(
+        id="whole-character-retained",
+        flag="--character-retained",
+        question="Does the reconstructed mix retain the source's overall musical character?",
+        help="whether the sum of the outputs still sounds like the piece",
+    ),
+    Criterion(
+        id="whole-objectionable-artifacts",
+        flag="--artifacts-objectionable",
+        question=(
+            "Was obvious phase destruction, pumping, or missing musical material perceived in "
+            "the reconstruction?"
+        ),
+        help="whether the reconstruction has audible damage; 'yes' here argues for rejection",
+    ),
+    Criterion(
+        id="whole-level-difference-perceived",
+        flag="--level-difference",
+        question="Was the reconstruction perceived as differing in overall level from the source?",
+        help=(
+            "a perceptual observation about loudness, kept as one rather than replaced by a "
+            "signal metric that answers a different question"
+        ),
+    ),
+    Criterion(
+        id="fit-as-evidence-for-activity-and-onset-inference",
+        flag="--fit-as-evidence",
+        question=(
+            "Are these outputs good enough to serve as evidence inputs for experimental "
+            "activity and onset inference?"
+        ),
+        help="the decisive question; 'no' means nothing downstream reads these files",
+    ),
+)
+
+#: What accepting a separation at gate 3 commits the project to. Narrow on
+#: purpose, and narrower than it looks: it licenses reading these files, and
+#: licenses nothing about what is in them.
+GATE_3_PURPOSE = (
+    "These exact separated bytes are fit to serve as evidence inputs for experimental activity "
+    "and onset inference. This is not a claim that any output is a verified instrument, and it "
+    "is not a claim that anything absent from an output is absent from the recording: an output "
+    "in which nothing was perceived is a failure to assign, never proof that nobody played."
+)
+
+#: How a gate 3 review is conducted, absent anything more specific.
+GATE_3_METHOD = (
+    "Auditioned every model output and the engineering diagnostics in the Stem Observatory, on "
+    "one shared transport clock, with solo, mute, loop and A/B against the source mix. Unaided "
+    "ears. No measurement beyond the hashes, durations, rates, channel counts, peaks and "
+    "residual levels the separation manifest already recorded."
+)
+
+
+def separation_review_path(
+    repository_root: Path, specimen_id: str, separation_manifest_hash: str
+) -> Path:
+    """Where the review of one exact separation lives.
+
+    Keyed by the *separation manifest's* hash rather than by the source hash,
+    because one accepted recording can be separated many times — another
+    revision, another backend, another parameter — and each of those is a
+    different set of bytes to have an opinion about.
+
+    The suffix differs from a specimen review's by more than a word: it has to,
+    because ``existing_reviews`` globs for ``*.review.json`` and a filename that
+    matched both would make one kind of review readable as the other.
+    """
+    return reviews_dir(repository_root) / (
+        f"{specimen_id}.{short_hash(separation_manifest_hash)}.separation-review.json"
+    )
+
+
+def existing_separation_reviews(repository_root: Path, specimen_id: str) -> list[Path]:
+    """Every separation review on disk for one specimen id, in a stable order."""
+    directory = reviews_dir(repository_root)
+    if not directory.is_dir():
+        return []
+    return sorted(directory.glob(f"{specimen_id}.*.separation-review.json"))
+
+
+def reviewed_artifacts(manifest: SeparationManifest) -> list[ReviewedArtifact]:
+    """Every file the Stem Observatory puts in front of a reviewer, by hash.
+
+    The source first because it is the evidence, the model outputs in the
+    separator's own order, then the rendered diagnostics. A diagnostic without
+    audio is a measurement rather than an exhibit and is not listed: nobody
+    listened to a number.
+    """
+    artifacts = [
+        ReviewedArtifact(
+            name="source",
+            kind="source",
+            path=manifest.source_path,
+            hash=manifest.source_audio.hash,
+        )
+    ]
+    artifacts += [
+        ReviewedArtifact(
+            name=stem.model_output,
+            kind="model_output",
+            path=stem.audio.path,
+            hash=stem.audio.hash,
+        )
+        for stem in manifest.stems
+    ]
+    artifacts += [
+        ReviewedArtifact(
+            name=diagnostic.id,
+            kind="diagnostic",
+            path=diagnostic.audio.path,
+            hash=diagnostic.audio.hash,
+        )
+        for diagnostic in manifest.diagnostics
+        if diagnostic.audio is not None
+    ]
+    return artifacts
+
+
+def build_separation_review(
+    manifest: SeparationManifest,
+    *,
+    manifest_path: str,
+    manifest_bytes: bytes,
+    reviewer: str,
+    reviewed_on: date,
+    responses: dict[str, CriterionResponse],
+    notes: dict[str, str] | None = None,
+    accepted: bool,
+    method: str = GATE_3_METHOD,
+    purpose: str = GATE_3_PURPOSE,
+    summary: str | None = None,
+    supplementary: list[SupplementaryListening] | None = None,
+) -> SeparationReview:
+    """Bind a person's answers to the exact separation a manifest describes.
+
+    The observations are copied from the manifest rather than re-measured, for
+    the same reason :func:`build_review` copies them: the manifest measured
+    these files, and a second measurement here would only create an opportunity
+    for the two to disagree.
+    """
+    missing = {c.id for c in GATE_3_CRITERIA} - set(responses)
+    if missing:
+        raise ReviewError(
+            f"every gate 3 criterion needs an answer; missing "
+            f"{', '.join(sorted(missing))}. A review with a question left blank is not a "
+            f"review, it is a partially examined assumption."
+        )
+
+    given = notes or {}
+    for identifier in given:
+        criterion(identifier, GATE_3_CRITERIA)  # raises with the known ids if this is a typo
+
+    return SeparationReview(
+        specimen_id=manifest.specimen_id,
+        source_audio=manifest.source_audio,
+        specimen_review_hash=manifest.review_hash,
+        separation_manifest_path=manifest_path,
+        separation_manifest_hash=hash_bytes(manifest_bytes),
+        separation_cache_key=manifest.cache_key,
+        separator=manifest.separator,
+        reviewed_artifacts=reviewed_artifacts(manifest),
+        review=HumanReview(
+            reviewer=reviewer,
+            reviewed_on=reviewed_on,
+            method=method,
+            criteria=[
+                ReviewCriterion(
+                    id=item.id,
+                    question=item.question,
+                    response=responses[item.id],
+                    notes=given.get(item.id),
+                )
+                for item in GATE_3_CRITERIA
+            ],
+            accepted=accepted,
+            purpose=purpose,
+            notes=summary,
+        ),
+        supplementary=list(supplementary or []),
+    )
+
+
+def write_separation_review(path: Path, review: SeparationReview) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(review.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def load_separation_review(path: Path) -> SeparationReview:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ReviewError(f"cannot read {path}: {exc}") from exc
+    try:
+        return SeparationReview.model_validate(document)
+    except ValidationError as exc:
+        raise ReviewError(f"{path} is not a valid separation review: {exc}") from exc
+
+
+def require_separation_accepted(
+    repository_root: Path, specimen_id: str, separation_manifest_hash: str
+) -> tuple[SeparationReview, Path]:
+    """The accepted review for exactly this separation, or a refusal that says why.
+
+    The same four failures :func:`require_accepted` keeps apart, one layer down,
+    and kept apart for the same reason: "not accepted" is four different
+    situations calling for four different actions.
+    """
+    candidates = existing_separation_reviews(repository_root, specimen_id)
+    if not candidates:
+        raise ReviewError(
+            f"no separation review exists for specimen {specimen_id!r} under "
+            f"{reviews_dir(repository_root)}. Gate 3 is passed by a human hearing the stems, "
+            f"not by them existing: audition them with "
+            f"`spectral-loom review-separation {specimen_id}`, then record the verdict with "
+            f"`spectral-loom accept-separation {specimen_id} ...`."
+        )
+
+    reviews = [(path, load_separation_review(path)) for path in candidates]
+
+    for path, review in reviews:
+        if review.separation_manifest_hash != separation_manifest_hash:
+            continue
+        if not review.review.accepted:
+            raise ReviewError(
+                f"{path} records that {review.review.reviewer} auditioned exactly this "
+                f"separation on {review.review.reviewed_on} and did NOT accept it. Nothing "
+                f"downstream reads stems a human rejected."
+            )
+        return review, path
+
+    reviewed = ", ".join(f"{r.separation_manifest_hash} ({p.name})" for p, r in reviews)
+    raise ReviewError(
+        f"the separation manifest on disk for specimen {specimen_id!r} hashes to "
+        f"{separation_manifest_hash}, which nobody has reviewed. Reviews exist for {reviewed}. "
+        f"A separation lives in a directory the next run reuses, so a result being present "
+        f"where an accepted one used to be is not evidence that anybody heard it — and this "
+        f"stage will not treat it as such."
     )

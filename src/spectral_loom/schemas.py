@@ -26,6 +26,8 @@ from spectral_loom.contracts import (
     GENERATION_SCHEMA_VERSION,
     REVIEW_SCHEMA_ID,
     REVIEW_SCHEMA_VERSION,
+    SEPARATION_REVIEW_SCHEMA_ID,
+    SEPARATION_REVIEW_SCHEMA_VERSION,
     SEPARATION_SCHEMA_ID,
     SEPARATION_SCHEMA_VERSION,
     SPEC_SCHEMA_ID,
@@ -34,6 +36,7 @@ from spectral_loom.contracts import (
     TIMELINE_SCHEMA_VERSION,
     GenerationManifest,
     SeparationManifest,
+    SeparationReview,
     SongSpec,
     SongTimeline,
     SpecimenReview,
@@ -45,6 +48,7 @@ Exported = (
     | type[GenerationManifest]
     | type[SpecimenReview]
     | type[SeparationManifest]
+    | type[SeparationReview]
 )
 
 SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
@@ -67,6 +71,11 @@ EXPORTS: dict[str, tuple[Exported, str, str]] = {
         SeparationManifest,
         SEPARATION_SCHEMA_ID,
         SEPARATION_SCHEMA_VERSION,
+    ),
+    "separation-review.schema.json": (
+        SeparationReview,
+        SEPARATION_REVIEW_SCHEMA_ID,
+        SEPARATION_REVIEW_SCHEMA_VERSION,
     ),
 }
 

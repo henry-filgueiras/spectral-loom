@@ -21,9 +21,15 @@ that gate can be passed. The acceptance is tracked even though the audio is not:
 the reviewer, the date, and each criterion answer. What it accepts is narrow — *these bytes are
 suitable as an experimental specimen* — and it establishes nothing about what the audio contains.
 
-Those bytes have been separated with the pinned HTDemucs snapshot, in 2.8 s on MPS. **Nobody has
-heard the stems**, so gate 3 is open, and it closes the same way gate 2 did: with a person
-listening. `./loom review-separation sparse-funk-exposed-bass` is the instrument for that.
+Those bytes have been separated with the pinned HTDemucs snapshot, in 2.8 s on MPS, and **the
+stems have been heard.** Henry auditioned all four model outputs and the diagnostics in the Stem
+Observatory on 2026-08-20 and accepted the separation as evidence input, so gate 3 is passed — by a
+human, which is the only way that gate can be passed either.
+`corpus/reviews/sparse-funk-exposed-bass.3ccd7df63e7f.separation-review.json` names the separation
+manifest's own hash, the pinned Demucs identity, and all seven artifacts that were in the exhibit,
+each by hash, so a regenerated separation cannot inherit the verdict. What it accepts is again
+narrow — *these stems are fit to be evidence inputs for activity and onset inference* — and it
+establishes nothing about which instruments the outputs contain.
 
 ## The pipeline this is built toward
 
@@ -109,6 +115,7 @@ identically.
 ./loom accept sparse-funk-exposed-bass --reviewer Henry --reviewed-on 2026-08-20 ...
 ./loom separate sparse-funk-exposed-bass
 ./loom review-separation sparse-funk-exposed-bass
+./loom accept-separation sparse-funk-exposed-bass --reviewer Henry --reviewed-on 2026-08-20 ...
 ```
 
 `generate` is the only expensive command and the only one that needs the cabinet environment. It
@@ -145,6 +152,16 @@ makes no request that leaves the machine, and records no verdict — gate 3 is p
 space play/pause   0 source   1-4 solo one output   A all four outputs
 M rendered sum     R residual   [ ] loop bounds     <- -> seek 5 s    esc clear
 ```
+
+`accept-separation` is `accept` one layer down, and it binds harder. A specimen id names an intent;
+a *separation* is identified by a directory the next run will reuse, so a re-separation on another
+backend or at another revision resolves to the same path with different bytes in it. So the review
+is keyed by the separation manifest's own content hash, it lists every artifact in the exhibit by
+hash, and the command re-hashes all of them before recording a word. Its question set is gate 3's,
+and two of its questions are careful on purpose: it asks whether there was *enough clearly audible
+cymbal material to judge cymbal separation at all*, and it asks what was *perceived in the `vocals`
+output* rather than what the source contained. Neither an unanswerable question nor a failure to
+assign may be written down as a fact about the music.
 
 `accept` records what a person decided after listening. It runs no model and reads no audio beyond
 hashing it, and the hash is the point: a specimen id names an *intent* and survives regeneration,
@@ -214,21 +231,7 @@ engraved sheet music, generalized DAW functionality, a large UI, and cloud infra
 
 ## Next experiment
 
-Gate 3 of [the roadmap](docs/roadmap.md), and like gate 2 it is not a coding task. The stems exist
-and nobody has heard them:
-
-```sh
-./loom review-separation sparse-funk-exposed-bass
-```
-
-The questions are printed beside the URL, per model output: is the bass line actually isolated or
-did the separation smear it, how much leakage is there, are transients damaged, is anything
-surprising in `other`, and is `vocals` effectively empty or has Demucs put an instrument in it.
-Then, for the whole separation: does the reconstruction retain the original character, and are
-these stems good enough to become evidence inputs for activity and onset inference?
-
-Nothing downstream — no timeline, no onsets, no notes, no projection, no second specimen — starts
-before that is answered. No corpus is generated before it passes.
+Gate 4 of [the roadmap](docs/roadmap.md).
 
 ## Project archaeology
 

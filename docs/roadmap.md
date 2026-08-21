@@ -47,23 +47,30 @@ established — nobody has analysed the audio, and a listener's ear is not a mea
 `archaeology/decisions/0010` for why the acceptance is keyed by hash rather than by specimen id,
 and why a human judgement is not one of the four truth layers.
 
-## Gate 3 — Separation, inspected ⏳
+## Gate 3 — Separation, inspected ✅
 
-Separate the accepted specimen with Demucs. Listen to the stems.
+Done. Henry auditioned every model output and the diagnostics in the Stem Observatory on
+2026-08-20 and accepted the separation as evidence input.
 
-**Where it stands:** the separation stage exists, refuses to run on bytes no human accepted, and
-has been run once on the accepted specimen — 2.8 s on MPS, four outputs at 44.1 kHz stereo, zero
-temporal offset between the summed outputs and the source, a residual 30.1 dB below it, and no
-warnings. The Stem Observatory exists so the result can be auditioned on one transport clock
-rather than in five unrelated files. **Nobody has heard the stems.** The gate is not passed by
-producing them, and the numbers above are engineering diagnostics rather than evidence about the
-music.
+**Evidence:** `corpus/reviews/sparse-funk-exposed-bass.3ccd7df63e7f.separation-review.json`,
+tracked, naming the separation manifest's own content hash — `sha256:3ccd7df63e7f…b449cf3f` — the
+pinned Demucs code and weight identity, and all seven artifacts that were in the exhibit, each by
+hash. The bass is clearly isolated with very little leakage; a possible slight kick-drum leak was
+heard but was subtle enough to be a muted bass note, so it is recorded as `unclear` rather than
+resolved by guessing. Kick, snare/rimshot and hi-hat material is coherent, with no melodic leakage
+and no damaged transients. `other` is **not** a single-instrument stem — several musical and
+timbral voices remain lumped together — and it is therefore not renamed. `vocals` is perceptually
+silent. The reconstruction retains the source's character with no objectionable artifacts, and was
+perceived as somewhat lower in overall level, which is preserved as the perceptual observation it
+is rather than replaced by a signal metric.
 
-**Passes when:** the stems have been heard, and the record says whether the bass is actually
-isolated or whether the separation smeared it — because every later inference reads these files,
-and an unheard stem is an unexamined assumption.
+Two answers are careful on purpose, and the record says why. **No cymbal verdict is drawn**: the
+accepted source offered no clearly audible cymbal or crash material to draw one from, so
+"insufficient material to judge" is what is written down, not "the separator lost the cymbals".
+And a perceptually silent `vocals` output is **a failure to assign**, never evidence that nobody
+sang.
 
-## Gate 4 — A minimal timeline
+## Gate 4 — A minimal timeline ⏳
 
 Compile a `song.timeline.json` from stem activity and onsets. Only `activity.sample`,
 `activity.interval`, and `onset`. Full provenance on every stage.

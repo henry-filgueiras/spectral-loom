@@ -75,6 +75,23 @@ stems: they are arithmetic on the outputs and carry no model opinion.
 
 Stems are untracked and regenerable from accepted bytes plus a pinned revision.
 
+A **separation review** is the tracked artifact at this layer, and it exists for the reason a
+specimen review does, one turn harder. A specimen id names an intent; a separation is identified by
+a *directory the next run will reuse*, so `corpus/derived/<specimen>/separation/` still resolves
+after a re-separation on another backend, at another revision, or with another parameter — pointing
+at stems nobody has heard. The review is therefore keyed by the separation manifest's own content
+hash and lists every artifact that was in the exhibit, each by hash; a stage asking "were *these*
+stems accepted" compares hashes and cannot be satisfied by a path. It reuses the same `HumanReview`
+block a specimen review uses, and shares nothing else: two cases is enough to reuse a primitive that
+already exists and not enough to invent a framework.
+
+The question set is where this layer's truth-layer discipline lives. A reviewer's answer is a fact
+about *their perception of a model output*, never about the recording — so the wording asks what
+was perceived in `vocals`, not what the source contained, and asks whether there was enough clearly
+audible cymbal material to judge cymbal separation *at all* rather than whether the separator lost
+the cymbals. A question that presumes its own answer is how an unanswerable question becomes a
+finding.
+
 ### 3. Inferred semantic timeline
 
 Separation and analysis produce a `song.timeline.json`: an envelope carrying a schema id and

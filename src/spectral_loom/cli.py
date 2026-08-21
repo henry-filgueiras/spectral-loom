@@ -9,6 +9,7 @@ Four commands. Three of them inspect and validate; one of them runs a model::
     spectral-loom accept SPECIMEN --reviewer NAME --reviewed-on DATE ...
     spectral-loom separate SPECIMEN [--device mps|cpu] [--json] [--force]
     spectral-loom review-separation SPECIMEN [--port N] [--no-open]
+    spectral-loom accept-separation SPECIMEN --reviewer NAME --reviewed-on DATE ...
 
 ``generate`` and ``separate`` are expensive and need the cabinet environment.
 Neither downloads:
@@ -75,8 +76,10 @@ from spectral_loom.contracts import (
     CriterionResponse,
     GenerationManifest,
     SeparationManifest,
+    SeparationReview,
     SongSpec,
     SongTimeline,
+    SupplementaryListening,
 )
 from spectral_loom.generate import (
     AUDIO_FILENAME,
@@ -97,11 +100,15 @@ from spectral_loom.observatory import (
 )
 from spectral_loom.review import (
     GATE_2_CRITERIA,
+    GATE_3_CRITERIA,
     ReviewError,
     build_review,
+    build_separation_review,
     require_accepted,
     review_path,
+    separation_review_path,
     write_review,
+    write_separation_review,
 )
 from spectral_loom.separate import DERIVED_DIRNAME as SEPARATION_DERIVED
 from spectral_loom.separate import SEPARATION_DIRNAME, SEPARATION_MANIFEST_FILENAME, SeparationError
@@ -924,6 +931,226 @@ def _print_separation(manifest: SeparationManifest, *, produced: bool, specimen_
 
 
 # ---------------------------------------------------------------------------
+# accept-separation
+# ---------------------------------------------------------------------------
+
+
+def separation_manifest_path(repo: Path, specimen_id: str) -> Path:
+    return (
+        repo / SEPARATION_DERIVED / specimen_id / SEPARATION_DIRNAME / SEPARATION_MANIFEST_FILENAME
+    )
+
+
+def verify_separation_on_disk(repo: Path, manifest: SeparationManifest) -> list[str]:
+    """Re-hash everything the manifest declares, and report what disagrees.
+
+    A verdict is about bytes. Between the separation and the moment somebody
+    records what they heard, the files may have been regenerated, truncated, or
+    replaced — and a review transferred onto different bytes because the
+    specimen id matched would be exactly the failure `decision:10` exists to
+    prevent, one layer down. So nothing is taken on trust here: the source and
+    every declared artifact are hashed again and compared.
+    """
+    problems: list[str] = []
+    declared = [(manifest.source_path, manifest.source_audio.hash)]
+    declared += [(s.audio.path, s.audio.hash) for s in manifest.stems]
+    declared += [(d.audio.path, d.audio.hash) for d in manifest.diagnostics if d.audio is not None]
+    for relative, expected in declared:
+        target = repo / relative
+        if not target.is_file():
+            problems.append(f"{relative} is declared by the separation manifest and is not on disk")
+            continue
+        found = hash_file(target)
+        if found != expected:
+            problems.append(
+                f"{relative} hashes to {found}, and the manifest recorded {expected}. These are "
+                f"not the bytes that were separated"
+            )
+    return problems
+
+
+def parse_supplementary(entries: list[str]) -> list[SupplementaryListening]:
+    """Split `--supplementary 'LISTENER | NATURE | SUMMARY'` triples.
+
+    Three parts because two would be dishonest. Recording *who* said something
+    and *what* they said, without recording how this project came by it, invites
+    a later reader to assume the second opinion was formed the same way the
+    reviewer's was.
+    """
+    parsed: list[SupplementaryListening] = []
+    for entry in entries:
+        parts = [part.strip() for part in entry.split("|", 2)]
+        if len(parts) != 3 or not all(parts):
+            raise ReviewError(
+                f"--supplementary must be 'LISTENER | NATURE | SUMMARY', found {entry!r}"
+            )
+        parsed.append(SupplementaryListening(listener=parts[0], nature=parts[1], summary=parts[2]))
+    return parsed
+
+
+def accept_separation_command(
+    specimen_id: str,
+    *,
+    reviewer: str,
+    reviewed_on: date,
+    responses: dict[str, CriterionResponse],
+    notes: dict[str, str],
+    supplementary: list[SupplementaryListening],
+    summary: str | None,
+    accepted: bool,
+    force: bool,
+    as_json: bool,
+    root: Path | None = None,
+) -> int:
+    """Write down what a human decided about one exact separation.
+
+    Like ``accept``, the command binds rather than judges — and it binds harder,
+    because a separation is identified by a directory the next run will reuse.
+    Every artifact the manifest declares is re-hashed before a word of the
+    verdict is written.
+    """
+    repo = find_repository_root(root or Path.cwd())
+    manifest_path = separation_manifest_path(repo, specimen_id)
+    if not manifest_path.is_file():
+        return _report_failure(
+            as_json,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                f"no separation manifest at {manifest_path}. Run "
+                f"`spectral-loom separate {specimen_id}` first; there is nothing to review."
+            ],
+        )
+
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+        manifest = load_separation(manifest_path)
+    except (OSError, SeparationError) as exc:
+        return _report_failure(as_json, EXIT_UNREADABLE, specimen_id, [str(exc)])
+
+    problems = verify_separation_on_disk(repo, manifest)
+    if problems:
+        return _report_failure(
+            as_json,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                *problems,
+                "A verdict is about bytes. This separation is not the one the manifest "
+                "describes, so nothing heard from it can be recorded against it.",
+            ],
+        )
+
+    try:
+        specimen_review, specimen_review_file = require_accepted(
+            repo, specimen_id, manifest.source_audio.hash
+        )
+    except ReviewError as exc:
+        return _report_failure(as_json, EXIT_BLOCKED, specimen_id, [str(exc)])
+
+    recorded = hash_file(specimen_review_file)
+    if recorded != manifest.review_hash:
+        return _report_failure(
+            as_json,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                f"{specimen_review_file} hashes to {recorded}, and the separation was run "
+                f"against a specimen review hashing to {manifest.review_hash}. The gate 2 "
+                f"receipt has changed since these stems were made."
+            ],
+        )
+
+    try:
+        review = build_separation_review(
+            manifest,
+            manifest_path=str(manifest_path.relative_to(repo)),
+            manifest_bytes=manifest_bytes,
+            reviewer=reviewer,
+            reviewed_on=reviewed_on,
+            responses=responses,
+            notes=notes,
+            accepted=accepted,
+            summary=summary,
+            supplementary=supplementary,
+        )
+    except (ReviewError, ValidationError) as exc:
+        return _report_failure(as_json, EXIT_INVALID, specimen_id, [str(exc)])
+
+    target = separation_review_path(repo, specimen_id, review.separation_manifest_hash)
+    if target.exists() and not force:
+        return _report_failure(
+            as_json,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                f"{target} already records a review of exactly this separation. Overwriting a "
+                f"recorded human judgement is a deliberate act; pass --force if that is what "
+                f"you mean."
+            ],
+        )
+    write_separation_review(target, review)
+
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "specimen_id": specimen_id,
+                    "accepted": accepted,
+                    "review": str(target),
+                    "separation_manifest_hash": review.separation_manifest_hash,
+                    "reviewed_artifacts": [
+                        a.model_dump(mode="json") for a in review.reviewed_artifacts
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return EXIT_OK
+
+    _print_separation_review(review, target, specimen_review.review.reviewer)
+    return EXIT_OK
+
+
+def _print_separation_review(review: SeparationReview, target: Path, source_reviewer: str) -> None:
+    verdict = "accepted" if review.review.accepted else "REJECTED"
+    print(
+        f"{review.specimen_id}: separation {verdict} by {review.review.reviewer} "
+        f"on {review.review.reviewed_on}"
+    )
+    print(f"  manifest    {review.separation_manifest_path}")
+    print(f"  sha256      {review.separation_manifest_hash}")
+    print(f"  separator   {review.separator.weights_repo}@{review.separator.weights_revision}")
+    print(f"  source      {review.source_audio.hash}  (accepted by {source_reviewer})")
+    print(f"  review      {target}")
+    print()
+    print("  bytes this verdict is bound to:")
+    for artifact in review.reviewed_artifacts:
+        print(f"    {artifact.kind:<13} {artifact.name:<15} {artifact.hash}")
+    print()
+    for item in review.review.criteria:
+        print(f"  {item.response.value:<8} {item.id}")
+        if item.notes:
+            print(f"           {item.notes}")
+    print()
+    if review.supplementary:
+        print("  supplementary, recorded as context and not as a second reviewer:")
+        for extra in review.supplementary:
+            print(f"    {extra.listener} — {extra.nature}")
+            print(f"      {extra.summary}")
+        print()
+    if review.review.notes:
+        print(f"  {review.review.notes}")
+        print()
+    print(
+        review.review.purpose
+        if review.review.accepted
+        else "Nothing downstream reads stems a human rejected."
+    )
+
+
+# ---------------------------------------------------------------------------
 # review-separation
 # ---------------------------------------------------------------------------
 
@@ -1176,6 +1403,69 @@ def build_parser() -> argparse.ArgumentParser:
     )
     separate_parser.add_argument("--json", action="store_true", help="machine-readable output")
 
+    accept_separation_parser = subparsers.add_parser(
+        "accept-separation",
+        help="record a human's verdict on one exact separation, bound to every stem hash",
+        description=(
+            "Writes a tracked review of the exact separation on disk for one specimen. Runs no "
+            "model. Re-hashes the source and every artifact the separation manifest declares "
+            "before recording anything, because a verdict is about bytes and a directory can be "
+            "regenerated under the same name. Every gate 3 criterion must be answered; "
+            "`unclear` exists so a reviewer who could not tell is not forced to say no. Use "
+            "--reject to record a rejection, which is history too."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    accept_separation_parser.add_argument("specimen_id")
+    accept_separation_parser.add_argument("--reviewer", required=True, help="who listened")
+    accept_separation_parser.add_argument(
+        "--reviewed-on",
+        required=True,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="the day they listened",
+    )
+    for item in GATE_3_CRITERIA:
+        accept_separation_parser.add_argument(
+            item.flag,
+            required=True,
+            dest=_criterion_dest(item.id),
+            choices=[r.value for r in CriterionResponse],
+            help=item.help,
+        )
+    accept_separation_parser.add_argument(
+        "--note",
+        action="append",
+        default=[],
+        metavar="CRITERION=TEXT",
+        help="qualify one criterion's answer; repeatable",
+    )
+    accept_separation_parser.add_argument(
+        "--supplementary",
+        action="append",
+        default=[],
+        metavar="'LISTENER | NATURE | SUMMARY'",
+        help=(
+            "a second opinion, recorded as context rather than as a reviewer; repeatable. "
+            "NATURE says how this project came by it, so nobody later assumes it was formed "
+            "the way the reviewer's was."
+        ),
+    )
+    accept_separation_parser.add_argument(
+        "--summary", help="free prose; on a rejection, what was wrong with the separation"
+    )
+    accept_separation_parser.add_argument(
+        "--reject", action="store_true", help="record a rejection rather than an acceptance"
+    )
+    accept_separation_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing review of exactly this separation",
+    )
+    accept_separation_parser.add_argument(
+        "--json", action="store_true", help="machine-readable output"
+    )
+
     observatory_parser = subparsers.add_parser(
         "review-separation",
         help="open the Stem Observatory for one separated specimen",
@@ -1241,6 +1531,28 @@ def main(argv: list[str] | None = None) -> int:
                 for item in GATE_2_CRITERIA
             },
             notes=notes,
+            summary=args.summary,
+            accepted=not args.reject,
+            force=args.force,
+            as_json=args.json,
+        )
+
+    if args.command == "accept-separation":
+        try:
+            notes = parse_notes(args.note)
+            supplementary = parse_supplementary(args.supplementary)
+        except ReviewError as exc:
+            return _report_failure(args.json, EXIT_INVALID, args.specimen_id, [str(exc)])
+        return accept_separation_command(
+            args.specimen_id,
+            reviewer=args.reviewer,
+            reviewed_on=args.reviewed_on,
+            responses={
+                item.id: CriterionResponse(getattr(args, _criterion_dest(item.id)))
+                for item in GATE_3_CRITERIA
+            },
+            notes=notes,
+            supplementary=supplementary,
             summary=args.summary,
             accepted=not args.reject,
             force=args.force,
