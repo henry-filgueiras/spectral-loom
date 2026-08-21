@@ -187,8 +187,23 @@ could not be cached, diffed, or compared against a later run.
 `review-timeline` builds the **Timeline Observatory**: the source waveform, the selected model
 output, the measured activity curve with its thresholds drawn on it, the inferred intervals, and the
 onset hypotheses, all on one Web Audio clock. Clicking an onset loops a short window around it and
-one key swaps the stem for the source mix, so answering "is that actually an audible onset" costs a
-click and a keypress. It reads the timeline and never writes it.
+zooms the view to match, and one key swaps the stem for the source mix — so answering "is that
+actually an audible onset" costs a click and a keypress rather than a JSON file and a media player.
+
+```text
+space play/pause   0 source   1-4 model output   S swap stem/source
+N/P next/previous onset   I/shift-I next/previous interval   enter audition the selection
+[ ] loop bounds   F fit   -/= zoom   <- -> seek 5 s   esc clear
+```
+
+Selecting an event shows its exact record — times, the absent confidence and why it is absent, the
+raw flux, the threshold it beat, the evidence artifact and its hash, the producing stage, and the
+parameters that decided it — without requiring anyone to read JSON, though the raw record is one
+disclosure away. An empty lane reads "0 activity intervals inferred under this rule and these
+thresholds", never "silent". The threshold explorer draws candidate intervals dashed under a banner
+calling them hypothetical, writes nothing anywhere, and — because it re-implements a rule that lives
+in Python — checks its own arithmetic against the compiled intervals and says so on screen if the
+two ever disagree. It reads the timeline and never writes it.
 
 `accept` records what a person decided after listening. It runs no model and reads no audio beyond
 hashing it, and the hash is the point: a specimen id names an *intent* and survives regeneration,

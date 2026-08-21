@@ -11,6 +11,7 @@ Four commands. Three of them inspect and validate; one of them runs a model::
     spectral-loom review-separation SPECIMEN [--port N] [--no-open]
     spectral-loom accept-separation SPECIMEN --reviewer NAME --reviewed-on DATE ...
     spectral-loom compile SPECIMEN [--json] [--force]
+    spectral-loom review-timeline SPECIMEN [--port N] [--no-open]
 
 ``generate`` and ``separate`` are expensive and need the cabinet environment.
 Neither downloads:
@@ -123,8 +124,12 @@ from spectral_loom.timeline import (
     cache_miss_reason,
     compile_timeline,
     load_receipt,
+    load_timeline,
 )
 from spectral_loom.timeline import plan as plan_compile
+from spectral_loom.timeline_observatory import TIMELINE_PAGE
+from spectral_loom.timeline_observatory import build_exhibit as build_timeline_exhibit
+from spectral_loom.timeline_observatory import render as render_timeline_page
 
 EXIT_OK = 0
 EXIT_BLOCKED = 1
@@ -1246,7 +1251,13 @@ def review_separation_command(
         return EXIT_OK
 
     try:
-        serve(exhibit, page, port=port, open_browser=open_browser)
+        serve(
+            exhibit.files,
+            page,
+            title=f"Stem Observatory for {exhibit.specimen_id}",
+            port=port,
+            open_browser=open_browser,
+        )
     except ObservatoryError as exc:
         return _report_failure(False, EXIT_BLOCKED, specimen_id, [str(exc)])
     return EXIT_OK
@@ -1429,6 +1440,150 @@ def _print_timeline(
 
 
 # ---------------------------------------------------------------------------
+# review-timeline
+# ---------------------------------------------------------------------------
+
+#: What gate 4 asks, per model output, printed beside the URL. Tailored to what
+#: this specimen's separation review actually established — `other` holds more
+#: than one voice, `vocals` is at the noise floor — and phrased so that none of
+#: it presumes an answer.
+TIMELINE_QUESTIONS: dict[str, tuple[str, ...]] = {
+    "bass": (
+        "Do onset markers generally coincide with audible bass attacks?",
+        "Are muted or soft notes being missed?",
+        "Is kick leakage producing onsets where no bass note is played?",
+        "Do activity intervals begin and end where phrases perceptually begin and end?",
+    ),
+    "drums": (
+        "Do onset hypotheses correspond mostly to audible drum transients?",
+        "Does the detector over-fire on hi-hats?",
+        "Are obvious kick or snare attacks missed?",
+        "Is activity nearly continuous, as the arrangement would suggest?",
+    ),
+    "other": (
+        "Given that this output holds several unresolved voices, what does an onset mean here?",
+        "Do onset markers correspond to useful musical attacks despite the overlapping timbres?",
+        "Are the activity intervals meaningful, or is this output simply active almost throughout?",
+    ),
+    "vocals": (
+        "Does the detector correctly leave this very low level output mostly unclaimed?",
+        "If it produced any events, what do they actually sound like when clicked?",
+        "Are those events leakage or noise hypotheses rather than musical ones?",
+    ),
+}
+
+WHOLE_TIMELINE_QUESTIONS: tuple[str, ...] = (
+    "Are event timings perceptually aligned with the source?",
+    "Are the mistakes obvious enough here that you can name them?",
+    "Does this minimal vocabulary already feel useful for future synchronized visuals?",
+    "Is any event semantics misleading enough that gate 4 should fail and the rule be redone?",
+)
+
+
+def review_timeline_command(
+    specimen_id: str,
+    *,
+    port: int,
+    open_browser: bool,
+    print_only: bool,
+    root: Path | None = None,
+) -> int:
+    """Build the Timeline Observatory and hand it to a person.
+
+    The command's job ends at "here is the page and here is what to listen
+    for". It records no verdict, because gate 4's verdict is not something a
+    program can produce and a command that offered to write one would be
+    inviting exactly the conflation this project exists to avoid.
+    """
+    repo = find_repository_root(root or Path.cwd())
+    try:
+        prepared = plan_compile(specimen_id, repo)
+    except CompileError as exc:
+        return _report_failure(False, EXIT_BLOCKED, specimen_id, [str(exc)])
+
+    if not prepared.receipt_path.is_file():
+        return _report_failure(
+            False,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                f"no compiled timeline at {prepared.relative(prepared.timeline_path)}. Run "
+                f"`spectral-loom compile {specimen_id}` first; there is nothing to review."
+            ],
+        )
+    try:
+        receipt = load_receipt(prepared.receipt_path)
+        stale = cache_miss_reason(prepared, receipt)
+    except CompileError as exc:
+        return _report_failure(False, EXIT_BLOCKED, specimen_id, [str(exc)])
+    if stale is not None:
+        return _report_failure(
+            False,
+            EXIT_BLOCKED,
+            specimen_id,
+            [
+                f"the timeline on disk is not current for these inputs: {stale}",
+                f"Re-run `spectral-loom compile {specimen_id}`. Auditioning events against audio "
+                f"they were not measured from would be worse than not auditioning them.",
+            ],
+        )
+
+    try:
+        timeline = load_timeline(prepared.timeline_path)
+        exhibit = build_timeline_exhibit(timeline, prepared.timeline_path, prepared.manifest, repo)
+    except (CompileError, ObservatoryError) as exc:
+        return _report_failure(False, EXIT_BLOCKED, specimen_id, [str(exc)])
+
+    page = render_timeline_page(exhibit)
+    written = write_page(repo, specimen_id, page, TIMELINE_PAGE)
+
+    _print_timeline_checklist(timeline, receipt)
+    print(f"timeline    {prepared.relative(prepared.timeline_path)}")
+    print(f"sha256      {receipt.timeline_sha256}")
+    print(f"page        {written}")
+    print()
+
+    if print_only:
+        return EXIT_OK
+
+    try:
+        serve(
+            exhibit.files,
+            page,
+            title=f"Timeline Observatory for {exhibit.specimen_id}",
+            port=port,
+            open_browser=open_browser,
+        )
+    except ObservatoryError as exc:
+        return _report_failure(False, EXIT_BLOCKED, specimen_id, [str(exc)])
+    return EXIT_OK
+
+
+def _print_timeline_checklist(timeline: SongTimeline, receipt: CompileReceipt) -> None:
+    """Print what gate 4 is asking, per model output, with what was claimed."""
+    print()
+    print("Gate 4 is passed by checking events against the audio. These are the questions, per")
+    print("model output — and the output names are the separator's own labels, not instruments.")
+    print()
+    for track in timeline.tracks:
+        output = track.id.split(".")[-1]
+        counts = receipt.event_counts.get(track.id, {})
+        print(
+            f"  {track.id}  —  {counts.get('activity.interval', 0)} intervals, "
+            f"{counts.get('onset', 0)} onset hypotheses"
+        )
+        for question in TIMELINE_QUESTIONS.get(output, ()):
+            print(f"    - {question}")
+        if output not in TIMELINE_QUESTIONS:
+            print("    (no tailored questions for this output; describe what you hear)")
+        print()
+    print("  whole timeline")
+    for question in WHOLE_TIMELINE_QUESTIONS:
+        print(f"    - {question}")
+    print()
+
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -1568,6 +1723,31 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     separate_parser.add_argument("--json", action="store_true", help="machine-readable output")
+
+    review_timeline_parser = subparsers.add_parser(
+        "review-timeline",
+        help="open the Timeline Observatory for one compiled specimen",
+        description=(
+            "Builds a local page in which the source, the selected model output, the measured "
+            "activity curve with its thresholds drawn on it, the inferred intervals and the "
+            "onset hypotheses share one transport clock, then serves it on loopback and opens "
+            "it. Clicking an onset loops a short window around it so it can be A/B'd against "
+            "the source mix. Runs no model, makes no request that leaves this machine, writes "
+            "nothing to the timeline, and records no verdict: gate 4 is passed by listening."
+        ),
+    )
+    review_timeline_parser.add_argument("specimen_id")
+    review_timeline_parser.add_argument(
+        "--port", type=int, default=0, help="port to listen on; 0 lets the kernel choose"
+    )
+    review_timeline_parser.add_argument(
+        "--no-open", action="store_true", help="print the URL rather than opening a browser"
+    )
+    review_timeline_parser.add_argument(
+        "--print-only",
+        action="store_true",
+        help="write the page and the checklist, and do not start a server",
+    )
 
     compile_parser = subparsers.add_parser(
         "compile",
@@ -1721,6 +1901,14 @@ def main(argv: list[str] | None = None) -> int:
             accepted=not args.reject,
             force=args.force,
             as_json=args.json,
+        )
+
+    if args.command == "review-timeline":
+        return review_timeline_command(
+            args.specimen_id,
+            port=args.port,
+            open_browser=not args.no_open,
+            print_only=args.print_only,
         )
 
     if args.command == "compile":

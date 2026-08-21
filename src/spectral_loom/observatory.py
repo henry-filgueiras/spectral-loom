@@ -57,6 +57,14 @@ REVIEW_PAGE = "index.html"
 #: files from a private checkout; it has no business being reachable.
 LOOPBACK = "127.0.0.1"
 
+#: What the whitelist may serve. Small and closed: this server exists to hand a
+#: browser a page and the artifacts that page is about, and nothing else.
+CONTENT_TYPES = {
+    ".wav": "audio/wav",
+    ".json": "application/json",
+    ".html": "text/html; charset=utf-8",
+}
+
 
 class ObservatoryError(Exception):
     """The exhibit could not be assembled from what is on disk."""
@@ -124,7 +132,7 @@ def display_model_name(manifest: SeparationManifest) -> str:
     return manifest.separator.weights_repo.split("/")[-1]
 
 
-def _verify(repository_root: Path, artifact: AudioArtifact) -> Path:
+def verify(repository_root: Path, artifact: AudioArtifact) -> Path:
     """Confirm an artifact is where the manifest says and is what it says.
 
     Checked before the page is built rather than discovered as a decode failure
@@ -203,7 +211,7 @@ def build_exhibit(
     )
 
     for index, stem in enumerate(manifest.stems, start=1):
-        files[f"/audio/{stem.model_output}"] = _verify(repository_root, stem.audio)
+        files[f"/audio/{stem.model_output}"] = verify(repository_root, stem.audio)
         lanes.append(
             Lane(
                 id=stem.model_output,
@@ -229,7 +237,7 @@ def build_exhibit(
     for diagnostic in manifest.diagnostics:
         if diagnostic.audio is None:
             continue
-        files[f"/audio/{diagnostic.id}"] = _verify(repository_root, diagnostic.audio)
+        files[f"/audio/{diagnostic.id}"] = verify(repository_root, diagnostic.audio)
         lanes.append(
             Lane(
                 id=diagnostic.id,
@@ -406,13 +414,18 @@ def _render_rows(exhibit: Exhibit) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _handler(exhibit: Exhibit, page: bytes) -> type[BaseHTTPRequestHandler]:
+def _handler(files: dict[str, Path], page: bytes) -> type[BaseHTTPRequestHandler]:
     """A handler that serves exactly one page and one fixed set of files.
 
     A whitelist rather than a document root, so there is no path to traverse:
     a request either names a URL the exhibit put in its own table, or it is a
     404. `SimpleHTTPRequestHandler` would have been fewer lines and would have
     exposed the checkout.
+
+    Content type comes from the extension of the file on disk rather than from
+    the request, because the whitelist is this project's own table and guessing
+    from a URL a browser sent would be reading input to decide how to label
+    output.
     """
 
     class Observatory(BaseHTTPRequestHandler):
@@ -423,12 +436,12 @@ def _handler(exhibit: Exhibit, page: bytes) -> type[BaseHTTPRequestHandler]:
             if route in {"/", "/index.html"}:
                 self._send(page, "text/html; charset=utf-8")
                 return
-            target = exhibit.files.get(route)
+            target = files.get(route)
             if target is None:
                 self.send_error(404, "no such artifact in this exhibit")
                 return
             try:
-                self._send(target.read_bytes(), "audio/wav")
+                self._send(target.read_bytes(), CONTENT_TYPES.get(target.suffix, "audio/wav"))
             except OSError as exc:
                 self.send_error(500, f"cannot read {route}: {exc}")
 
@@ -446,21 +459,35 @@ def _handler(exhibit: Exhibit, page: bytes) -> type[BaseHTTPRequestHandler]:
     return Observatory
 
 
-def write_page(repository_root: Path, specimen_id: str, page: str) -> Path:
-    """Put the rendered page on disk beside the separation it describes.
+def write_page(
+    repository_root: Path, specimen_id: str, page: str, filename: str = REVIEW_PAGE
+) -> Path:
+    """Put a rendered page on disk beside the artifacts it describes.
 
     Written as well as served, because an artifact you can point at is easier to
     reason about than one that only exists inside a process — and because
     `corpus/derived/` is already the ignored place derived things go.
     """
-    target = repository_root / DERIVED_DIRNAME / specimen_id / REVIEW_DIRNAME / REVIEW_PAGE
+    target = repository_root / DERIVED_DIRNAME / specimen_id / REVIEW_DIRNAME / filename
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(page, encoding="utf-8")
     return target
 
 
-def serve(exhibit: Exhibit, page: str, *, port: int = 0, open_browser: bool = True) -> None:
-    """Serve the exhibit on loopback until interrupted.
+def serve(
+    files: dict[str, Path],
+    page: str,
+    *,
+    title: str,
+    port: int = 0,
+    open_browser: bool = True,
+) -> None:
+    """Serve one page and its whitelist on loopback until interrupted.
+
+    Takes the whitelist rather than an exhibit, because two different review
+    surfaces now need exactly this and nothing else from each other. That is
+    the whole of what they share: a loopback socket, a fixed table of files,
+    and no way to reach anything not in it.
 
     Port 0 by default: the kernel picks a free one, so two specimens can be
     open at once and nothing collides with whatever else is listening.
@@ -469,17 +496,17 @@ def serve(exhibit: Exhibit, page: str, *, port: int = 0, open_browser: bool = Tr
 
     class Server(ThreadingHTTPServer):
         # Threading, because the page fetches every lane at once and a
-        # single-threaded server would serialize seven eight-megabyte reads.
+        # single-threaded server would serialize several megabyte reads.
         daemon_threads = True
         allow_reuse_address = True
 
     try:
-        httpd = Server((LOOPBACK, port), _handler(exhibit, encoded))
+        httpd = Server((LOOPBACK, port), _handler(files, encoded))
     except OSError as exc:
         raise ObservatoryError(f"cannot listen on {LOOPBACK}:{port}: {exc}") from exc
 
     url = f"http://{LOOPBACK}:{httpd.server_address[1]}/"
-    print(f"Stem Observatory for {exhibit.specimen_id}")
+    print(title)
     print(f"  {url}")
     print("  loopback only; nothing here reaches the network")
     print("  Ctrl-C to stop")
