@@ -76,3 +76,33 @@ def test_the_javascript_carries_its_own_escapes() -> None:
     page = load_page(timeline_observatory.PAGE_TEMPLATE)
     assert r"join('\n')" in page
     assert "join('\n')" not in page, "a real newline is sitting inside a JS string literal"
+
+
+# ---------------------------------------------------------------------------
+# The page's own references, and why they are relative.
+# ---------------------------------------------------------------------------
+
+
+def test_a_page_references_its_artifacts_relatively() -> None:
+    """So the page inherits whatever prefix it was served under.
+
+    An absolute `/audio/bass` makes the browser resolve against the origin root,
+    so the request never carries the path the page was served under. Behind a
+    prefix — a reverse proxy handing out a capability URL — every such fetch
+    escapes the prefix and misses, and the proxy's own path rewriting cannot
+    save it: the browser built the URL before the proxy ever saw it.
+    """
+    from spectral_loom.observatory import page_url
+
+    assert page_url("/audio/bass") == "audio/bass"
+    assert page_url("/timeline.json") == "timeline.json"
+    assert page_url("audio/bass") == "audio/bass"
+
+
+def test_the_server_still_routes_on_absolute_paths() -> None:
+    """Relative is how the page *asks*; absolute is what arrives on the wire."""
+    from spectral_loom.observatory import page_url
+
+    assert page_url("/audio/bass") != "/audio/bass"
+    # and the whitelist a server matches against keeps the leading slash
+    assert "/" + page_url("/audio/bass") == "/audio/bass"

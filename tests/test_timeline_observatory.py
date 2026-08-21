@@ -423,3 +423,20 @@ def test_the_page_still_has_no_writer_of_any_kind(tmp_path: Path) -> None:
         "indexedDB",
     ):
         assert forbidden not in page, forbidden
+
+
+def test_the_payload_hands_the_page_relative_urls(tmp_path: Path) -> None:
+    """The whitelist stays absolute; what the page fetches does not."""
+    exhibit, _prepared, _timeline = exhibit_for(tmp_path)
+    payload = exhibit.payload()
+
+    assert not payload["timeline_url"].startswith("/")
+    assert not payload["novelty_url"].startswith("/")
+    assert not payload["source"]["url"].startswith("/")
+    assert all(not t["url"].startswith("/") for t in payload["tracks"])
+
+    # ...and every one of them still names a route the server actually serves.
+    for relative in [payload["timeline_url"], payload["novelty_url"], payload["source"]["url"]] + [
+        t["url"] for t in payload["tracks"]
+    ]:
+        assert "/" + relative in exhibit.files

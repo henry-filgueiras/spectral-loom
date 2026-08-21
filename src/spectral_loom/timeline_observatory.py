@@ -67,7 +67,12 @@ from spectral_loom.analysis import (
 )
 from spectral_loom.contracts import Provenance, SeparationManifest, SongTimeline
 from spectral_loom.hashing import hash_file
-from spectral_loom.observatory import REVIEW_DIRNAME, ObservatoryError, verify
+from spectral_loom.observatory import (
+    REVIEW_DIRNAME,
+    ObservatoryError,
+    page_url,
+    verify,
+)
 from spectral_loom.separate import DERIVED_DIRNAME
 from spectral_loom.timeline import INTERVAL_STAGE, MEASURE_STAGE, ONSET_PARAMETERS, ONSET_STAGE
 
@@ -164,9 +169,9 @@ class TimelineExhibit:
         return {
             "specimen_id": self.specimen_id,
             "duration_s": self.duration_s,
-            "timeline_url": self.timeline_url,
+            "timeline_url": page_url(self.timeline_url),
             "source": {
-                "url": self.source_url,
+                "url": page_url(self.source_url),
                 "path": self.source_path,
                 "hash": self.source_hash,
             },
@@ -175,7 +180,7 @@ class TimelineExhibit:
                     "id": track.id,
                     "model_output": track.model_output,
                     "label": track.label,
-                    "url": track.url,
+                    "url": page_url(track.url),
                     "path": track.path,
                     "hash": track.hash,
                     "shortcut": track.shortcut,
@@ -188,7 +193,7 @@ class TimelineExhibit:
                 "min_duration_s": self.min_duration_s,
                 "merge_gap_s": self.merge_gap_s,
             },
-            "novelty_url": NOVELTY_URL,
+            "novelty_url": page_url(NOVELTY_URL),
             "flux_floor": self.flux_floor,
         }
 

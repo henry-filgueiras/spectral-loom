@@ -88,6 +88,27 @@ PAGE_TEMPLATE = "stem_observatory.html"
 PAGES = Path(__file__).resolve().parent / "pages"
 
 
+def page_url(route: str) -> str:
+    """The form of a route that a *page* should reference: relative, not absolute.
+
+    A page that fetches ``/audio/bass`` makes the browser resolve that against
+    the origin root, so the request never carries whatever path the page itself
+    was served under. Served behind a prefix — a reverse proxy handing out a
+    capability URL, say — every one of those fetches escapes the prefix and
+    misses, and a proxy's own path rewriting cannot help: the browser has
+    already built the URL before the proxy sees it.
+
+    ``audio/bass`` resolves against the page's own directory instead, so it
+    inherits any prefix automatically and the server behind it stays unaware
+    that one exists. On loopback the two forms are indistinguishable, which is
+    why this costs nothing.
+
+    The server's route table keeps the absolute form: that is what arrives on
+    the wire either way.
+    """
+    return route.lstrip("/")
+
+
 def load_page(name: str) -> str:
     """Read one page template, or say which file is missing and from where."""
     target = PAGES / name
@@ -231,7 +252,7 @@ def build_exhibit(
                 f"The exact bytes {review.review.reviewer} accepted on "
                 f"{review.review.reviewed_on}. The evidence; everything below is a claim about it."
             ),
-            url="/audio/source",
+            url=page_url("/audio/source"),
             path=manifest.source_path,
             hash=manifest.source_audio.hash,
             duration_s=manifest.source_audio.duration_s,
@@ -255,7 +276,7 @@ def build_exhibit(
                     f"The signal {model} assigned to its “{stem.model_output}” output. Not a "
                     f"verified instrument, and not evidence about what the source contained."
                 ),
-                url=f"/audio/{stem.model_output}",
+                url=page_url(f"/audio/{stem.model_output}"),
                 path=stem.audio.path,
                 hash=stem.audio.hash,
                 duration_s=stem.audio.duration_s,
@@ -278,7 +299,7 @@ def build_exhibit(
                 label=f"Diagnostic · {diagnostic.id}",
                 kind="diagnostic",
                 caption=diagnostic.description,
-                url=f"/audio/{diagnostic.id}",
+                url=page_url(f"/audio/{diagnostic.id}"),
                 path=diagnostic.audio.path,
                 hash=diagnostic.audio.hash,
                 duration_s=diagnostic.audio.duration_s,
