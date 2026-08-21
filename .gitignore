@@ -69,5 +69,16 @@ dist/
 .coverage
 htmlcov/
 
+# Keys and certificates. Nothing in this project generates or needs one, and
+# that is the point: the review servers bind loopback and exposing one is an
+# external reverse proxy's job, configured outside this repository. This rule
+# exists so that a cert script run with the wrong working directory cannot put
+# a private key into the tree.
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+
 # macOS.
 .DS_Store

@@ -205,6 +205,14 @@ calling them hypothetical, writes nothing anywhere, and — because it re-implem
 in Python — checks its own arithmetic against the compiled intervals and says so on screen if the
 two ever disagree. It reads the timeline and never writes it.
 
+Both observatories bind **loopback and only loopback**, and there is no flag that changes it. If
+one needs to be reachable from another device, that is a reverse proxy's job and it is configured
+outside this repository — the seam is deliberately narrow. `--port` pins the upstream, `--no-open`
+suppresses the browser, and every page references its own artifacts relatively, so a proxy can serve
+one under a path prefix without this project knowing that a prefix exists. Nothing else is required
+and nothing else is offered: the capability to expose a private checkout stays outside the tool that
+reads it.
+
 `accept` records what a person decided after listening. It runs no model and reads no audio beyond
 hashing it, and the hash is the point: a specimen id names an *intent* and survives regeneration,
 so a matching directory name is not evidence that anyone heard these particular bytes. The review
