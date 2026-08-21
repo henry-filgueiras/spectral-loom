@@ -22,11 +22,13 @@ import pytest
 from spectral_loom.contracts import SongTimeline
 from spectral_loom.hashing import hash_file
 from spectral_loom.observatory import ObservatoryError
-from spectral_loom.timeline import CompilePlan, compile_timeline, plan
+from spectral_loom.timeline import ONSET_PARAMETERS, CompilePlan, compile_timeline, plan
 from spectral_loom.timeline_observatory import (
+    NOVELTY_URL,
     TIMELINE_URL,
     TimelineExhibit,
     build_exhibit,
+    novelty_path,
     render,
 )
 from tests.test_timeline import SHAPES, SPECIMEN, build_repository
@@ -46,7 +48,7 @@ def exhibit_for(root: Path) -> tuple[TimelineExhibit, CompilePlan, SongTimeline]
 
 def test_the_whitelist_holds_the_source_the_stems_and_the_document(tmp_path: Path) -> None:
     exhibit, prepared, _ = exhibit_for(tmp_path)
-    assert set(exhibit.files) == {"/audio/source", TIMELINE_URL} | {
+    assert set(exhibit.files) == {"/audio/source", TIMELINE_URL, NOVELTY_URL} | {
         f"/audio/{name}" for name in SHAPES
     }
     assert exhibit.files[TIMELINE_URL] == prepared.timeline_path
@@ -218,3 +220,79 @@ def test_the_page_names_the_specimen_and_escapes_it(tmp_path: Path) -> None:
     assert f"Timeline Observatory — {SPECIMEN}" in page
     assert "<!--__TITLE__-->" not in page
     assert "/*__EXHIBIT__*/" not in page
+
+
+# ---------------------------------------------------------------------------
+# The peaks the rule declined.
+# ---------------------------------------------------------------------------
+
+
+def test_the_novelty_sidecar_is_written_beside_the_page(tmp_path: Path) -> None:
+    exhibit, _prepared, _timeline = exhibit_for(tmp_path)
+    target = novelty_path(tmp_path, SPECIMEN)
+    assert exhibit.files[NOVELTY_URL] == target
+    assert target.is_file()
+    assert target.parent.name == "review"
+
+
+def test_the_sidecar_says_inside_itself_that_it_is_not_a_semantic_artifact(
+    tmp_path: Path,
+) -> None:
+    """It will be found on disk months later without any of this context."""
+    exhibit, _prepared, _timeline = exhibit_for(tmp_path)
+    document = json.loads(exhibit.files[NOVELTY_URL].read_text())
+    explanation = document["_what_this_is"]
+    assert "NOT a semantic artifact" in explanation
+    assert "is not in song.timeline.json" in explanation
+    assert document["timeline_sha256"].startswith("sha256:")
+
+
+def test_the_sidecar_is_computed_by_the_compiler_s_own_analysis(tmp_path: Path) -> None:
+    """Not a second implementation of the rule, which is the whole point."""
+    exhibit, _prepared, _timeline = exhibit_for(tmp_path)
+    document = json.loads(exhibit.files[NOVELTY_URL].read_text())
+    assert document["tool"] == "spectral_loom.analysis.infer_onsets"
+    assert document["parameters"]["median_multiplier"] == ONSET_PARAMETERS["median_multiplier"]
+    assert document["parameters"]["flux_floor"] == ONSET_PARAMETERS["flux_floor"]
+
+
+def test_the_sidecar_agrees_with_the_timeline_about_what_was_accepted(tmp_path: Path) -> None:
+    exhibit, _prepared, timeline = exhibit_for(tmp_path)
+    document = json.loads(exhibit.files[NOVELTY_URL].read_text())
+    for track in timeline.tracks:
+        accepted = [e for e in track.events if e.type == "onset"]
+        assert document["tracks"][track.id]["accepted"] == len(accepted)
+
+
+def test_no_declined_peak_coincides_with_an_accepted_onset(tmp_path: Path) -> None:
+    """A candidate must never be mistakable for a claim, starting with its time."""
+    exhibit, _prepared, timeline = exhibit_for(tmp_path)
+    document = json.loads(exhibit.files[NOVELTY_URL].read_text())
+    for track in timeline.tracks:
+        accepted = {e.start_s for e in track.events if e.type == "onset"}
+        declined = {c["start_s"] for c in document["tracks"][track.id]["rejected"]}
+        assert not accepted & declined
+
+
+def test_the_page_says_a_declined_peak_is_not_a_claim(tmp_path: Path) -> None:
+    page = render(exhibit_for(tmp_path)[0])
+    assert "This is not a claim." in page
+    assert "A DECLINED PEAK — not an event, and not in the timeline" in page
+    assert "not events, not in the" in page
+
+
+def test_the_page_says_what_it_is_not_drawing(tmp_path: Path) -> None:
+    """A count for the below-floor peaks, so their absence is stated not implied."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "rejected_below_floor" in page
+    assert "counted rather than drawn" in page
+
+
+def test_the_novelty_axis_is_labelled_and_its_crossings_are_claimed_exact(
+    tmp_path: Path,
+) -> None:
+    """A log axis is fine; an unlabelled one that hides the rule is not."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "log axis" in page
+    assert "crossings are exact" in page
+    assert "largest in view" in page

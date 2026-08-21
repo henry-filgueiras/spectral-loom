@@ -477,15 +477,51 @@ class Onset:
     frame_rms_dbfs: float
 
 
+#: Why a local maximum in the novelty curve did not become an onset. Kept apart
+#: because they are three different facts about the rule: one says the frame was
+#: too quiet to consider at all, one says it lost to its own neighbourhood, and
+#: one says it was fine and arrived too soon after the last accepted onset.
+REJECTED_BELOW_FLOOR: Final = "below_absolute_floor"
+REJECTED_BELOW_THRESHOLD: Final = "below_adaptive_threshold"
+REJECTED_WITHIN_MIN_GAP: Final = "within_min_gap_of_previous_onset"
+
+
+@dataclass(frozen=True)
+class RejectedCandidate:
+    """A peak in the novelty curve that the rule declined.
+
+    **Not an event**, and deliberately not an :class:`Onset`: it is never written
+    to a timeline, and the type is separate so that it cannot be by accident.
+    It exists so a detector can be judged on what it turned down as well as on
+    what it claimed — a peak that missed by five is a different fact about the
+    rule than one that missed by twenty, and neither is visible from the
+    accepted onsets alone.
+    """
+
+    start_s: float
+    flux: float
+    threshold: float
+    margin: float
+    local_median: float
+    frame_rms_dbfs: float
+    reason: str
+
+
 @dataclass(frozen=True)
 class OnsetAnalysis:
-    """The novelty curve and the events picked off it."""
+    """The novelty curve, the events picked off it, and the peaks that were not."""
 
     start_s: Signal
     flux: Signal
     threshold: Signal
     frame_rms_dbfs: Signal
     onsets: list[Onset]
+    #: Local maxima that cleared the absolute floor and were then rejected. Peaks
+    #: below the floor are counted rather than listed: the detector considers
+    #: them too quiet to be anything, and listing them would bury the ones worth
+    #: looking at under a few thousand that are not.
+    rejected: list[RejectedCandidate]
+    rejected_below_floor: int
     fft_samples: int
     hop_samples: int
     sample_rate_hz: int
@@ -550,6 +586,27 @@ def rolling_median(values: Signal, radius: int) -> Signal:
     return medians
 
 
+def _candidate(
+    moment: float,
+    value: float,
+    bar: float,
+    local_median: Signal,
+    level: Signal,
+    index: int,
+    reason: str,
+) -> RejectedCandidate:
+    """One declined peak, rounded exactly as an accepted one would have been."""
+    return RejectedCandidate(
+        start_s=quantize(moment, TIME_PLACES),
+        flux=quantize(value, FLUX_PLACES),
+        threshold=quantize(bar, FLUX_PLACES),
+        margin=quantize(value - bar, FLUX_PLACES),
+        local_median=quantize(float(local_median[index]), FLUX_PLACES),
+        frame_rms_dbfs=quantize(float(level[index]), DB_PLACES),
+        reason=reason,
+    )
+
+
 def infer_onsets(
     audio: Audio,
     *,
@@ -582,6 +639,8 @@ def infer_onsets(
             threshold=empty,
             frame_rms_dbfs=empty,
             onsets=[],
+            rejected=[],
+            rejected_below_floor=0,
             fft_samples=fft_samples,
             hop_samples=hop_samples,
             sample_rate_hz=audio.sample_rate_hz,
@@ -600,18 +659,41 @@ def infer_onsets(
         is_peak = np.ones(flux.size, dtype=bool)
 
     onsets: list[Onset] = []
+    rejected: list[RejectedCandidate] = []
+    below_floor = 0
     last = -math.inf
-    for index in np.flatnonzero(is_peak & (flux >= threshold)):
+    # Every local maximum is a candidate. Walking all of them rather than only
+    # the ones that pass keeps the accepted and the rejected on one code path,
+    # so a candidate's numbers are the same numbers the decision was made on.
+    for position in np.flatnonzero(is_peak):
+        index = int(position)
         moment = float(starts[index])
-        if moment - last < min_gap_s:
+        value = float(flux[index])
+        bar = float(threshold[index])
+
+        if value < bar:
+            if value < flux_floor:
+                below_floor += 1
+            else:
+                rejected.append(
+                    _candidate(
+                        moment, value, bar, local_median, level, index, REJECTED_BELOW_THRESHOLD
+                    )
+                )
             continue
+        if moment - last < min_gap_s:
+            rejected.append(
+                _candidate(moment, value, bar, local_median, level, index, REJECTED_WITHIN_MIN_GAP)
+            )
+            continue
+
         last = moment
         onsets.append(
             Onset(
                 start_s=quantize(moment, TIME_PLACES),
-                flux=quantize(float(flux[index]), FLUX_PLACES),
-                threshold=quantize(float(threshold[index]), FLUX_PLACES),
-                margin=quantize(float(flux[index] - threshold[index]), FLUX_PLACES),
+                flux=quantize(value, FLUX_PLACES),
+                threshold=quantize(bar, FLUX_PLACES),
+                margin=quantize(value - bar, FLUX_PLACES),
                 local_median=quantize(float(local_median[index]), FLUX_PLACES),
                 frame_rms_dbfs=quantize(float(level[index]), DB_PLACES),
             )
@@ -623,6 +705,8 @@ def infer_onsets(
         threshold=threshold,
         frame_rms_dbfs=level,
         onsets=onsets,
+        rejected=rejected,
+        rejected_below_floor=below_floor,
         fft_samples=fft_samples,
         hop_samples=hop_samples,
         sample_rate_hz=audio.sample_rate_hz,

@@ -48,10 +48,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from spectral_loom.analysis import (
+    ONSET_FLUX_FLOOR,
+    AnalysisError,
+    infer_onsets,
+    quantize,
+    read_wav_mono,
+)
 from spectral_loom.contracts import Provenance, SeparationManifest, SongTimeline
 from spectral_loom.hashing import hash_file
-from spectral_loom.observatory import ObservatoryError, verify
-from spectral_loom.timeline import INTERVAL_STAGE, MEASURE_STAGE, ONSET_STAGE
+from spectral_loom.observatory import REVIEW_DIRNAME, ObservatoryError, verify
+from spectral_loom.separate import DERIVED_DIRNAME
+from spectral_loom.timeline import INTERVAL_STAGE, MEASURE_STAGE, ONSET_PARAMETERS, ONSET_STAGE
 
 #: The page lands beside the Stem Observatory's, under the same ignored
 #: directory, with a name that says which instrument it is.
@@ -61,6 +69,21 @@ TIMELINE_PAGE = "timeline.html"
 #: itself rather than a summary of it, so the record an inspector shows is the
 #: record on disk and not a second rendering of it that could drift.
 TIMELINE_URL = "/timeline.json"
+
+#: The novelty curves and the peaks the rule declined, recomputed for review.
+#:
+#: **Not a semantic artifact and never one.** A rejected candidate is not an
+#: event, it is not in `song.timeline.json`, and it never will be — it exists so
+#: that a detector can be judged on what it turned down as well as on what it
+#: claimed. The file says so inside itself, because a JSON document found on
+#: disk months later will be read without its context.
+#:
+#: Recomputed by :mod:`spectral_loom.analysis` — the same functions, at the same
+#: parameters, that produced the accepted onsets — rather than by a second
+#: implementation. That is the whole reason it is built in Python and handed to
+#: the page rather than derived in the browser.
+NOVELTY_URL = "/novelty.json"
+NOVELTY_FILENAME = "review-novelty.json"
 
 
 @dataclass(frozen=True)
@@ -98,6 +121,8 @@ class TimelineExhibit:
     merge_gap_s: float
     provenance: list[tuple[str, str]]
     parameters: list[tuple[str, str]]
+    #: The absolute flux floor, so the page can say what it is not showing.
+    flux_floor: float
     files: dict[str, Path] = field(default_factory=dict)
 
     def payload(self) -> dict[str, Any]:
@@ -128,7 +153,83 @@ class TimelineExhibit:
                 "min_duration_s": self.min_duration_s,
                 "merge_gap_s": self.merge_gap_s,
             },
+            "novelty_url": NOVELTY_URL,
+            "flux_floor": self.flux_floor,
         }
+
+
+def novelty_path(repository_root: Path, specimen_id: str) -> Path:
+    """Where the recomputed review data lands: beside the page, ignored with it."""
+    return repository_root / DERIVED_DIRNAME / specimen_id / REVIEW_DIRNAME / NOVELTY_FILENAME
+
+
+def build_novelty(
+    tracks: list[TrackView], repository_root: Path, timeline_hash: str, specimen_id: str
+) -> dict[str, Any]:
+    """Recompute the novelty curve and the declined peaks for every model output.
+
+    By calling :func:`spectral_loom.analysis.infer_onsets` — the *same* function,
+    at the same parameters, that produced the accepted onsets in the timeline —
+    rather than reimplementing the rule. The page then draws arrays. That is the
+    difference between a review surface that can disagree with the compiler and
+    one that cannot: the threshold explorer already re-implements the interval
+    rule in JavaScript and needs a self-check because of it, and this deliberately
+    does not repeat that.
+
+    The curves are rounded to two decimal places. They are drawn, not decided on;
+    the numbers a decision was made on travel with each candidate at the
+    compiler's own precision.
+    """
+    document: dict[str, Any] = {
+        "_what_this_is": (
+            "Recomputed for review by spectral_loom.analysis, at the parameters recorded in the "
+            "timeline. NOT a semantic artifact. A rejected candidate is NOT an event, is not in "
+            "song.timeline.json, and must never be read as one: it is a peak in the novelty "
+            "curve that this rule declined, kept so the detector can be judged on what it turned "
+            "down as well as on what it claimed."
+        ),
+        "specimen_id": specimen_id,
+        "timeline_sha256": timeline_hash,
+        "tool": "spectral_loom.analysis.infer_onsets",
+        "parameters": dict(ONSET_PARAMETERS),
+        "flux_floor": ONSET_FLUX_FLOOR,
+        "tracks": {},
+    }
+    for track in tracks:
+        try:
+            audio = read_wav_mono(repository_root / track.path)
+        except AnalysisError as exc:
+            raise ObservatoryError(str(exc)) from exc
+        analysis = infer_onsets(audio)
+        document["tracks"][track.id] = {
+            "hop_s": quantize(analysis.resolution_s, 6),
+            "frames": int(analysis.flux.size),
+            "flux_max": quantize(float(analysis.flux.max()) if analysis.flux.size else 0.0, 2),
+            "flux": [round(float(v), 2) for v in analysis.flux],
+            "threshold": [round(float(v), 2) for v in analysis.threshold],
+            "accepted": len(analysis.onsets),
+            "rejected": [
+                {
+                    "start_s": c.start_s,
+                    "flux": c.flux,
+                    "threshold": c.threshold,
+                    "margin": c.margin,
+                    "local_median": c.local_median,
+                    "frame_rms_dbfs": c.frame_rms_dbfs,
+                    "reason": c.reason,
+                }
+                for c in analysis.rejected
+            ],
+            "rejected_below_floor": analysis.rejected_below_floor,
+        }
+    return document
+
+
+def write_novelty(repository_root: Path, specimen_id: str, document: dict[str, Any]) -> Path:
+    target = novelty_path(repository_root, specimen_id)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return target
 
 
 def _stage(timeline: SongTimeline, name: str) -> Provenance:
@@ -213,6 +314,15 @@ def build_exhibit(
             )
         )
 
+    # Written here rather than by the caller so that the whitelist never names a
+    # file that does not exist yet. This builder already reads and hashes every
+    # artifact it is about; writing one review asset into the ignored review
+    # directory beside the page is the same kind of act.
+    document = build_novelty(
+        tracks, repository_root, hash_file(timeline_path), timeline.specimen_id
+    )
+    files[NOVELTY_URL] = write_novelty(repository_root, timeline.specimen_id, document)
+
     return TimelineExhibit(
         specimen_id=timeline.specimen_id,
         duration_s=timeline.source_audio.duration_s,
@@ -230,6 +340,7 @@ def build_exhibit(
         merge_gap_s=_number(rule, "merge_gap_s", INTERVAL_STAGE),
         provenance=_provenance_rows(timeline, timeline_path, repository_root),
         parameters=_parameter_rows(interval_stage, onset_stage),
+        flux_floor=ONSET_FLUX_FLOOR,
         files=files,
     )
 
@@ -331,7 +442,7 @@ _TEMPLATE = """<!doctype html>
 :root {
   --bg: #0d1013; --panel: #14181d; --line: #232a31; --ink: #d7dee5;
   --dim: #8b97a3; --accent: #6fd0c0; --stem: #7aa7ff; --onset: #e0a76a;
-  --interval: #7fd18a; --hypo: #c99bd8; --warn: #e0776a;
+  --interval: #7fd18a; --hypo: #c99bd8; --warn: #e0776a; --cand: #6b7f96;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --labels: 300px;
 }
@@ -382,7 +493,7 @@ main { padding: 12px 18px 40px; }
    the sizes it renders at. */
 .wave canvas { display: block; width: 100%; height: 76px; }
 .lane.activity .wave canvas { height: 118px; }
-.lane.onsets .wave canvas { height: 84px; }
+.lane.onsets .wave canvas { height: 150px; }
 .name { font-weight: 600; }
 .lane.source .name { color: var(--accent); }
 .lane.stem .name { color: var(--stem); }
@@ -453,6 +564,8 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
     <button id="nextOnset">onset &#8594;</button>
     <button id="prevInterval">&#8592; interval</button>
     <button id="nextInterval">interval &#8594;</button>
+    <button id="prevCandidate">&#8592; declined</button>
+    <button id="nextCandidate">declined &#8594;</button>
     <span class="sep"></span>
     <button id="fit">fit</button>
     <button id="zoomOut">&#8722;</button>
@@ -467,6 +580,8 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
     <label class="opt">interval margin
       <input type="number" id="margin" value="250" step="50" min="0"> ms</label>
     <span class="sep"></span>
+    <label class="opt"><input type="checkbox" id="candidates" checked> show declined peaks</label>
+    <span class="sep"></span>
     <label class="opt"><input type="checkbox" id="hypo"> hypothetical thresholds</label>
     <label class="opt">enter <input type="number" id="hypoEnter" step="1"> dBFS</label>
     <label class="opt">exit <input type="number" id="hypoExit" step="1"> dBFS</label>
@@ -478,6 +593,7 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
     <b>-</b>/<b>=</b> zoom · <b>&larr;</b> <b>&rarr;</b> seek 5 s · <b>esc</b> clear
   </div>
   <p id="hypobanner"></p>
+  <div class="keys" id="candidateCount"></div>
   <p id="status">loading…</p>
 </header>
 <main>
@@ -513,9 +629,10 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
         <div class="meta" id="onsetMeta"></div>
         <div class="caption">
           Markers are all the same height. This detector reports no calibrated confidence, and a
-          marker whose height varied would be read as one. The dot is the raw flux value on a
-          scale from zero to the largest in this track.
+          marker whose height varied would be read as one. Below them: the novelty curve this
+          detector measured, and the adaptive threshold it was compared against.
         </div>
+        <div class="caption" id="candidateCaption"></div>
         <div class="empty" id="onsetEmpty"></div>
       </div>
       <div class="wave"><canvas data-canvas="onsets" height="80"></canvas></div>
@@ -559,6 +676,7 @@ LANES.forEach(id => {
 });
 
 let timeline = null;          // the compiled document, as it is on disk
+let novelty = null;           // recomputed for review; NOT part of the timeline
 let byTrack = {};             // track id -> { samples, intervals, onsets, window_s, hop_s }
 let selectedTrack = EXHIBIT.tracks[0].id;
 let listenTo = selectedTrack; // which buffer is audible
@@ -821,12 +939,83 @@ function drawActivity() {
 function drawOnsets() {
   const { g, w, h } = canvasFor('onsets');
   const data = byTrack[selectedTrack];
+  const nov = novelty && novelty.tracks[selectedTrack];
   if (!data) return;
-  const top = h - 22;
-  const maxFlux = data.onsets.reduce((m, e) => Math.max(m, e.payload.flux), 1);
+
+  // The lane is two rows: markers on top, the curve the markers came from
+  // below. The curve is where magnitude is allowed to be visible, because it is
+  // a plotted quantity with a stated maximum rather than a mark that might be
+  // read as a confidence.
+  const markerBottom = 54;
+  const curveTop = markerBottom + 8;
+  const curveBottom = h - 12;
+  const showCandidates = document.getElementById('candidates').checked;
 
   g.strokeStyle = '#1d242b'; g.beginPath();
-  g.moveTo(0, top + .5); g.lineTo(w, top + .5); g.stroke();
+  g.moveTo(0, markerBottom + .5); g.lineTo(w, markerBottom + .5); g.stroke();
+
+  if (nov) {
+    // Scaled to the largest value *in view*, not to the largest in the track.
+    // At full-file zoom those are the same; zoomed in they are not, and a curve
+    // pinned to a track maximum of several hundred draws every quiet
+    // articulation flat against the axis — which is exactly the material this
+    // lane exists to make visible. The axis maximum is relabelled as it changes,
+    // so the number is never implied.
+    const first = Math.max(0, Math.floor(view.a / nov.hop_s) - 1);
+    const last = Math.min(nov.frames - 1, Math.ceil(view.b / nov.hop_s) + 1);
+    let top = 1;
+    for (let i = first; i <= last; i++) {
+      if (nov.flux[i] > top) top = nov.flux[i];
+      if (nov.threshold[i] > top) top = nov.threshold[i];
+    }
+    // Logarithmic, because spectral flux spans two orders of magnitude within one
+    // track: a plucked attack of 261 next to a hammer-on of 28 draws the second
+    // flat against the axis on a linear scale, and the second is the material
+    // this lane exists for. log1p is monotonic and fixes zero at zero, so **every
+    // crossing between the two curves is exactly where it is in the numbers** —
+    // which is the only relationship this plot has to get right.
+    const span = Math.log1p(top);
+    const yOf = v =>
+      curveBottom - (Math.log1p(Math.max(0, Math.min(v, top))) / span) * (curveBottom - curveTop);
+
+    // the adaptive threshold, first, so the curve draws over it
+    const curve = (values, colour, alpha) => {
+      g.strokeStyle = colour; g.globalAlpha = alpha; g.beginPath();
+      for (let i = first; i <= last; i++) {
+        const x = xOf(i * nov.hop_s, w), y = yOf(values[i]);
+        i === first ? g.moveTo(x, y) : g.lineTo(x, y);
+      }
+      g.stroke(); g.globalAlpha = 1;
+    };
+    curve(nov.threshold, 'rgba(224,119,106,.75)', 1);
+    curve(nov.flux, '#e0a76a', 0.9);
+
+    g.font = '10px ui-monospace, monospace';
+    g.fillStyle = '#e0a76a';
+    g.fillText('novelty', 4, curveTop + 10);
+    g.fillStyle = 'rgba(224,119,106,.9)';
+    g.fillText('threshold', 60, curveTop + 10);
+    g.fillStyle = '#5d6b7a';
+    g.fillText(
+      'log axis, 0 to ' + top.toFixed(0) + ' (largest in view); crossings are exact',
+      140, curveTop + 10);
+
+    // the peaks the rule declined: dashed, and never the same as an accepted one
+    if (showCandidates) {
+      g.save();
+      g.setLineDash([3, 3]);
+      nov.rejected.forEach(c => {
+        const x = xOf(c.start_s, w);
+        if (x < -2 || x > w + 2) return;
+        const chosen = selection && selection.kind === 'candidate' && selection.event === c;
+        g.strokeStyle = chosen ? '#ffffff' : '#6b7f96';
+        g.lineWidth = chosen ? 2 : 1;
+        g.beginPath(); g.moveTo(x, 14); g.lineTo(x, markerBottom); g.stroke();
+      });
+      g.restore();
+      g.lineWidth = 1;
+    }
+  }
 
   data.onsets.forEach(e => {
     const x = xOf(e.start_s, w);
@@ -835,12 +1024,8 @@ function drawOnsets() {
     // Uniform height. No probability exists, so nothing here encodes one.
     g.strokeStyle = chosen ? '#ffffff' : '#e0a76a';
     g.lineWidth = chosen ? 2 : 1;
-    g.beginPath(); g.moveTo(x, 2); g.lineTo(x, top); g.stroke();
+    g.beginPath(); g.moveTo(x, 2); g.lineTo(x, markerBottom); g.stroke();
     g.lineWidth = 1;
-    // The raw statistic, as a dot, clearly separate from the marker.
-    const y = top + 18 - (e.payload.flux / maxFlux) * 16;
-    g.fillStyle = chosen ? '#ffffff' : 'rgba(224,167,106,.75)';
-    g.beginPath(); g.arc(x, y, chosen ? 3 : 2, 0, Math.PI * 2); g.fill();
   });
 }
 function redraw() {
@@ -901,13 +1086,47 @@ function describe(kind, event) {
   }
   return rows;
 }
+const REASONS = {
+  below_adaptive_threshold:
+    'its novelty did not reach 2.0 x the local median plus the absolute floor. The local median ' +
+    'rises after a loud attack, so a quiet articulation close behind one is judged against a ' +
+    'higher bar than the same articulation in silence would be.',
+  within_min_gap_of_previous_onset:
+    'it cleared the threshold and arrived less than the minimum gap after the previous accepted ' +
+    'onset.',
+  below_absolute_floor:
+    'its novelty was below the absolute floor, at which this detector considers a frame too ' +
+    'quiet to be anything.',
+};
+function describeCandidate(c) {
+  return [
+    ['what this is', 'A DECLINED PEAK — not an event, and not in the timeline'],
+    ['start_s', c.start_s.toFixed(6)],
+    ['rejected because', REASONS[c.reason] || c.reason],
+    ['novelty (flux)', String(c.flux)],
+    ['threshold it faced', String(c.threshold)],
+    ['margin', c.margin.toFixed(6) + '  (negative: it fell short by this much)'],
+    ['local_median', String(c.local_median)],
+    ['frame_rms_dbfs', String(c.frame_rms_dbfs)],
+    ['evidence.artifact', EXHIBIT.tracks.find(t => t.id === selectedTrack).path],
+    ['evidence.artifact_hash', EXHIBIT.tracks.find(t => t.id === selectedTrack).hash],
+    ['recomputed by', novelty.tool + ' at the parameters recorded in the timeline'],
+  ];
+}
 function select(kind, event, index) {
   selection = { kind, event, index };
-  const rows = describe(kind, event);
+  const candidate = kind === 'candidate';
+  const rows = candidate ? describeCandidate(event) : describe(kind, event);
+  const banner = candidate
+    ? '<p class="hint" style="color:var(--warn)"><b>This is not a claim.</b> The rule declined ' +
+      'this peak, so no event for it exists in song.timeline.json. It is shown so the detector ' +
+      'can be judged on what it turned down.</p>'
+    : '';
   document.getElementById('inspectorBody').innerHTML =
+    banner +
     '<table>' + rows.map(([k, v]) =>
       `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('') + '</table>' +
-    '<p class="hint">Press <b>enter</b> to audition this claim, or <b>S</b> to swap between the ' +
+    '<p class="hint">Press <b>enter</b> to audition this, or <b>S</b> to swap between the ' +
     'model output and the source mix while it loops.</p>';
   document.getElementById('rawWrap').style.display = 'block';
   document.getElementById('rawJson').textContent = JSON.stringify(event, null, 2);
@@ -920,7 +1139,7 @@ function escapeHtml(s) {
 function audition() {
   if (!selection) return;
   const e = selection.event;
-  if (selection.kind === 'onset') {
+  if (selection.kind === 'onset' || selection.kind === 'candidate') {
     const pre = Number(document.getElementById('pre').value) / 1000;
     const post = Number(document.getElementById('post').value) / 1000;
     loop = { a: Math.max(0, e.start_s - pre), b: Math.min(duration, e.start_s + post) };
@@ -934,10 +1153,18 @@ function audition() {
   start(loop.a);
   draw();
 }
+function listFor(kind) {
+  const data = byTrack[selectedTrack];
+  if (!data) return [];
+  if (kind === 'onset') return data.onsets;
+  if (kind === 'interval') return data.intervals;
+  const nov = novelty && novelty.tracks[selectedTrack];
+  return nov ? nov.rejected : [];
+}
 function step(kind, direction) {
   const data = byTrack[selectedTrack];
   if (!data) return;
-  const list = kind === 'onset' ? data.onsets : data.intervals;
+  const list = listFor(kind);
   if (!list.length) return;
   const from = selection && selection.kind === kind ? selection.index : null;
   let index;
@@ -956,15 +1183,16 @@ function pickAt(time, kind) {
   const data = byTrack[selectedTrack];
   if (!data) return false;
   const tolerance = (view.b - view.a) * 0.01;
-  if (kind === 'onset') {
+  if (kind === 'onset' || kind === 'candidate') {
+    const list = listFor(kind);
     let best = null, bestIndex = -1;
-    data.onsets.forEach((e, i) => {
+    list.forEach((e, i) => {
       const d = Math.abs(e.start_s - time);
       if (d <= tolerance && (best === null || d < Math.abs(best.start_s - time))) {
         best = e; bestIndex = i;
       }
     });
-    if (best) { select('onset', best, bestIndex); return true; }
+    if (best) { select(kind, best, bestIndex); return true; }
     return false;
   }
   const i = data.intervals.findIndex(e => time >= e.start_s && time <= e.end_s);
@@ -993,13 +1221,25 @@ function selectTrack(id) {
       ? '0 activity intervals inferred under this rule and these thresholds. That is a statement ' +
         'about the detector, not about the recording.'
       : '';
+  const nov = novelty && novelty.tracks[id];
   document.getElementById('onsetMeta').textContent =
-    data ? `${data.onsets.length} hypotheses` : '';
+    data ? `${data.onsets.length} hypotheses` +
+           (nov ? ` · ${nov.rejected.length} peaks declined` : '') : '';
+  document.getElementById('candidateCaption').textContent = nov
+    ? `Dashed markers are peaks the rule declined — not events, not in the timeline. Shown are ` +
+      `the ${nov.rejected.length} that cleared the absolute floor of ${EXHIBIT.flux_floor} and ` +
+      `were then rejected; a further ${nov.rejected_below_floor} fell below that floor and are ` +
+      `counted rather than drawn, because drawing them would bury these.`
+    : '';
   document.getElementById('onsetEmpty').textContent =
     data && data.onsets.length === 0
       ? '0 onset hypotheses produced here at these parameters. Nothing was found; nothing has ' +
         'been established about what is in the recording.'
       : '';
+  document.getElementById('candidateCount').textContent = nov
+    ? `${nov.accepted} accepted · ${nov.rejected.length} declined above the floor · ` +
+      `${nov.rejected_below_floor} below it`
+    : '';
   selection = null;
   document.getElementById('rawWrap').style.display = 'none';
   applyGains();
@@ -1016,6 +1256,9 @@ document.getElementById('nextOnset').onclick = () => step('onset', +1);
 document.getElementById('prevOnset').onclick = () => step('onset', -1);
 document.getElementById('nextInterval').onclick = () => step('interval', +1);
 document.getElementById('prevInterval').onclick = () => step('interval', -1);
+document.getElementById('nextCandidate').onclick = () => step('candidate', +1);
+document.getElementById('prevCandidate').onclick = () => step('candidate', -1);
+document.getElementById('candidates').addEventListener('input', redraw);
 function swapListening() {
   listeningToSource = !listeningToSource;
   listenTo = listeningToSource ? 'source' : selectedTrack;
@@ -1040,7 +1283,14 @@ document.getElementById('hit').onclick = e => {
   const t = tOf(e.clientX - r.left, r.width);
   const laneTop = document.querySelector('[data-canvas="onsets"]').getBoundingClientRect();
   const onOnsetLane = e.clientY >= laneTop.top && e.clientY <= laneTop.bottom;
-  if (onOnsetLane && pickAt(t, 'onset')) { audition(); return; }
+  if (onOnsetLane) {
+    // An accepted onset wins a tie with a declined peak: the claim is what the
+    // page is primarily about, and the declined peak is context for it.
+    if (pickAt(t, 'onset')) { audition(); return; }
+    if (document.getElementById('candidates').checked && pickAt(t, 'candidate')) {
+      audition(); return;
+    }
+  }
   const actTop = document.querySelector('[data-canvas="activity"]').getBoundingClientRect();
   if (e.clientY >= actTop.top && e.clientY <= actTop.bottom && pickAt(t, 'interval')) {
     audition(); return;
@@ -1063,6 +1313,8 @@ window.addEventListener('keydown', e => {
   if (k === 'p' || k === 'P') { step('onset', -1); return; }
   if (k === 'i') { step('interval', +1); return; }
   if (k === 'I') { step('interval', -1); return; }
+  if (k === 'r') { step('candidate', +1); return; }
+  if (k === 'R') { step('candidate', -1); return; }
   if (k === 'N') { step('onset', -1); return; }
   if (k === 'Enter') { audition(); return; }
   if (k === '[') { loop.a = position(); normaliseLoop(); return; }
@@ -1101,6 +1353,11 @@ const status = document.getElementById('status');
   if (!response.ok) throw new Error(EXHIBIT.timeline_url + ': ' + response.status);
   timeline = await response.json();
   byTrack = indexTimeline(timeline);
+
+  status.textContent = 'reading the novelty curves…';
+  const nov = await fetch(EXHIBIT.novelty_url);
+  if (!nov.ok) throw new Error(EXHIBIT.novelty_url + ': ' + nov.status);
+  novelty = await nov.json();
 
   const wanted = [{ id: 'source', url: EXHIBIT.source.url }]
     .concat(EXHIBIT.tracks.map(t => ({ id: t.id, url: t.url })));

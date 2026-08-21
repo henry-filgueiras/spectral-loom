@@ -31,6 +31,9 @@ from spectral_loom.analysis import (
     ACTIVITY_EXIT_DBFS,
     ACTIVITY_HOP_SAMPLES,
     ACTIVITY_WINDOW_SAMPLES,
+    ONSET_FLUX_FLOOR,
+    REJECTED_BELOW_THRESHOLD,
+    REJECTED_WITHIN_MIN_GAP,
     SILENCE_FLOOR_DBFS,
     AnalysisError,
     Audio,
@@ -410,3 +413,71 @@ def test_reading_and_analysing_a_written_file_agrees_with_the_array(
     in_memory = infer_intervals(measure_activity(audio_of(signal)))
     assert len(from_disk) == len(in_memory) == 1
     assert from_disk[0].start_s == in_memory[0].start_s
+
+
+# ---------------------------------------------------------------------------
+# What the rule declined, and why.
+# ---------------------------------------------------------------------------
+
+
+def test_a_peak_that_fails_the_adaptive_term_is_reported_with_its_reason() -> None:
+    """Loud attacks over a noisy bed, at the compiled parameters.
+
+    The bed raises the flux everywhere, so lesser peaks clear the absolute floor
+    and are then judged against a local median the bed also raised. That is the
+    same shape as the musical case this reporting exists for — a quiet
+    articulation behind a loud attack — and it is the half that can be
+    reproduced from a synthesized signal.
+    """
+    bed = np.random.default_rng(7).normal(0.0, 0.01, seconds(4.0))
+    analysis = infer_onsets(audio_of(impulses_at(4.0, [0.6, 1.2, 1.8, 2.4]) + bed))
+
+    assert analysis.onsets
+    assert analysis.rejected
+    for candidate in analysis.rejected:
+        assert candidate.reason == REJECTED_BELOW_THRESHOLD
+        assert candidate.margin < 0
+        # It cleared the floor and lost to its own neighbourhood, which is a
+        # different fact from being too quiet to consider.
+        assert candidate.flux >= ONSET_FLUX_FLOOR
+        assert candidate.local_median > 0
+
+
+def test_peaks_below_the_absolute_floor_are_counted_not_listed() -> None:
+    """Listing them would bury the interesting ones under a few thousand."""
+    generator = np.random.default_rng(20260820)
+    noise = generator.normal(0.0, 0.0009, seconds(4.0))
+    analysis = infer_onsets(audio_of(noise))
+
+    assert analysis.onsets == []
+    assert analysis.rejected == []
+    assert analysis.rejected_below_floor > 0
+
+
+def test_every_listed_candidate_cleared_the_floor() -> None:
+    analysis = infer_onsets(audio_of(impulses_at(4.0, [0.6, 0.75, 1.2, 1.35, 2.0])))
+    assert all(c.flux >= ONSET_FLUX_FLOOR for c in analysis.rejected)
+
+
+def test_an_accepted_onset_is_never_also_a_declined_peak() -> None:
+    analysis = infer_onsets(audio_of(impulses_at(4.0, [0.6, 1.2, 1.8, 2.4])))
+    accepted = {o.start_s for o in analysis.onsets}
+    assert accepted
+    assert not accepted & {c.start_s for c in analysis.rejected}
+
+
+def test_the_min_gap_rule_is_representable_as_its_own_reason() -> None:
+    """A peak that cleared the threshold and merely arrived too soon."""
+    analysis = infer_onsets(audio_of(impulses_at(4.0, [0.6, 1.2, 1.8, 2.4])), min_gap_s=1.5)
+    reasons = {c.reason for c in analysis.rejected}
+    assert REJECTED_WITHIN_MIN_GAP in reasons
+    gapped = [c for c in analysis.rejected if c.reason == REJECTED_WITHIN_MIN_GAP]
+    assert all(c.margin >= 0 for c in gapped), "a gapped peak had already beaten the threshold"
+
+
+def test_a_declined_peak_carries_the_numbers_the_decision_was_made_on() -> None:
+    analysis = infer_onsets(audio_of(impulses_at(4.0, [0.6, 0.75, 1.2, 1.35])))
+    for candidate in analysis.rejected:
+        assert candidate.margin == pytest.approx(candidate.flux - candidate.threshold, abs=1e-5)
+        assert candidate.frame_rms_dbfs > SILENCE_FLOOR_DBFS
+        assert candidate.local_median >= 0
