@@ -516,6 +516,12 @@ class OnsetAnalysis:
     threshold: Signal
     frame_rms_dbfs: Signal
     onsets: list[Onset]
+    #: Every local maximum in the novelty curve, by frame index. The candidate
+    #: set the rule chose from, kept so that a review surface can ask what the
+    #: same rule would have done at a different floor without re-deriving the
+    #: novelty, the running median, or the peak picking — the three parts that
+    #: would be worth duplicating badly.
+    peak_frames: list[int]
     #: Local maxima that cleared the absolute floor and were then rejected. Peaks
     #: below the floor are counted rather than listed: the detector considers
     #: them too quiet to be anything, and listing them would bury the ones worth
@@ -639,6 +645,7 @@ def infer_onsets(
             threshold=empty,
             frame_rms_dbfs=empty,
             onsets=[],
+            peak_frames=[],
             rejected=[],
             rejected_below_floor=0,
             fft_samples=fft_samples,
@@ -705,6 +712,7 @@ def infer_onsets(
         threshold=threshold,
         frame_rms_dbfs=level,
         onsets=onsets,
+        peak_frames=[int(i) for i in np.flatnonzero(is_peak)],
         rejected=rejected,
         rejected_below_floor=below_floor,
         fft_samples=fft_samples,

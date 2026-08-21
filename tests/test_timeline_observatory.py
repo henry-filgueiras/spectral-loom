@@ -296,3 +296,130 @@ def test_the_novelty_axis_is_labelled_and_its_crossings_are_claimed_exact(
     assert "log axis" in page
     assert "crossings are exact" in page
     assert "largest in view" in page
+
+
+# ---------------------------------------------------------------------------
+# Moving the floor hypothetically.
+# ---------------------------------------------------------------------------
+
+
+def test_the_sidecar_ships_the_candidate_set_the_rule_chose_from(tmp_path: Path) -> None:
+    exhibit, _prepared, _timeline = exhibit_for(tmp_path)
+    document = json.loads(exhibit.files[NOVELTY_URL].read_text())
+    for track in document["tracks"].values():
+        n = len(track["peak_t"])
+        assert n
+        assert len(track["peak_flux"]) == n
+        assert len(track["peak_adaptive"]) == n
+        assert len(track["peak_dbfs"]) == n
+    assert document["min_gap_s"] > 0
+
+
+def test_the_shipped_adaptive_term_plus_the_floor_is_the_threshold(tmp_path: Path) -> None:
+    """What makes the page's derivation exact rather than an approximation."""
+    exhibit, _prepared, _timeline = exhibit_for(tmp_path)
+    document = json.loads(exhibit.files[NOVELTY_URL].read_text())
+    floor = document["flux_floor"]
+    for track in document["tracks"].values():
+        hop = track["hop_s"]
+        for t, adaptive in zip(track["peak_t"], track["peak_adaptive"], strict=True):
+            frame = round(t / hop)
+            assert adaptive + floor == pytest.approx(track["threshold"][frame], abs=0.02)
+
+
+def test_the_candidate_set_reproduces_the_accepted_onsets_at_the_compiled_floor(
+    tmp_path: Path,
+) -> None:
+    """The invariant the page checks itself against, asserted here so CI holds it too.
+
+    If this ever fails, the floor control in the browser is deriving something
+    the compiler did not, and the page's own self-check would be the only thing
+    standing between a reviewer and a fabricated event.
+    """
+    exhibit, _prepared, _timeline = exhibit_for(tmp_path)
+    document = json.loads(exhibit.files[NOVELTY_URL].read_text())
+    floor, min_gap = document["flux_floor"], document["min_gap_s"]
+
+    for track in document["tracks"].values():
+        derived: list[float] = []
+        last = -1e9
+        for t, flux, adaptive in zip(
+            track["peak_t"], track["peak_flux"], track["peak_adaptive"], strict=True
+        ):
+            if flux < adaptive + floor or t - last < min_gap:
+                continue
+            last = t
+            derived.append(t)
+        assert derived == pytest.approx(track["accepted_t"], abs=1e-6)
+
+
+def test_lowering_the_floor_can_only_add_and_raising_it_can_only_remove(
+    tmp_path: Path,
+) -> None:
+    """The control must not be quietly one-sided; the page draws both directions."""
+    exhibit, _prepared, _timeline = exhibit_for(tmp_path)
+    document = json.loads(exhibit.files[NOVELTY_URL].read_text())
+    track = max(document["tracks"].values(), key=lambda t: len(t["accepted_t"]))
+
+    def accept(floor: float) -> set[float]:
+        out: set[float] = set()
+        last = -1e9
+        for t, flux, adaptive in zip(
+            track["peak_t"], track["peak_flux"], track["peak_adaptive"], strict=True
+        ):
+            if flux < adaptive + floor or t - last < document["min_gap_s"]:
+                continue
+            last = t
+            out.add(t)
+        return out
+
+    compiled = accept(document["flux_floor"])
+    assert accept(document["flux_floor"] * 3) <= compiled
+    assert compiled <= accept(0.0)
+
+
+def test_the_page_carries_the_floor_control_and_says_it_is_hypothetical(
+    tmp_path: Path,
+) -> None:
+    page = render(exhibit_for(tmp_path)[0])
+    assert "hypothetical onset floor" in page
+    assert "HYPOTHETICAL ONSET FLOOR" in page
+    assert "nothing has been written" in page
+    assert "reproduces the compiler exactly" in page
+    assert "THIS PAGE DISAGREES WITH THE COMPILER at the compiled floor" in page
+
+
+# ---------------------------------------------------------------------------
+# The cross-output raster, and the notebook.
+# ---------------------------------------------------------------------------
+
+
+def test_the_raster_refuses_to_let_coincidence_read_as_a_finding(tmp_path: Path) -> None:
+    """Parts played together coincide; so does leakage. The lane must say so."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "all outputs" in page
+    assert "Coincidence establishes nothing on its own" in page
+    assert "says where to look, never what is true" in page
+
+
+def test_the_notebook_says_it_writes_nothing_and_offers_the_way_out(tmp_path: Path) -> None:
+    page = render(exhibit_for(tmp_path)[0])
+    assert "Review marks" in page
+    assert "the page writes nothing" in page
+    assert "copy them out before you close it" in page
+    assert "copy marks as text" in page
+
+
+def test_the_page_still_has_no_writer_of_any_kind(tmp_path: Path) -> None:
+    """Marking a claim must not have become a way to acquire one."""
+    page = render(exhibit_for(tmp_path)[0])
+    for forbidden in (
+        "XMLHttpRequest",
+        "sendBeacon",
+        "localStorage",
+        "sessionStorage",
+        "method: 'POST'",
+        'method: "POST"',
+        "indexedDB",
+    ):
+        assert forbidden not in page, forbidden

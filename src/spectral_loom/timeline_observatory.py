@@ -50,6 +50,7 @@ from typing import Any
 
 from spectral_loom.analysis import (
     ONSET_FLUX_FLOOR,
+    ONSET_MIN_GAP_S,
     AnalysisError,
     infer_onsets,
     quantize,
@@ -193,6 +194,7 @@ def build_novelty(
         "tool": "spectral_loom.analysis.infer_onsets",
         "parameters": dict(ONSET_PARAMETERS),
         "flux_floor": ONSET_FLUX_FLOOR,
+        "min_gap_s": ONSET_MIN_GAP_S,
         "tracks": {},
     }
     for track in tracks:
@@ -201,13 +203,27 @@ def build_novelty(
         except AnalysisError as exc:
             raise ObservatoryError(str(exc)) from exc
         analysis = infer_onsets(audio)
+        # Every local maximum the rule chose from, with the *adaptive* half of the
+        # threshold it faced. The floor is a constant added to that half, so a
+        # review surface can ask what this same rule would have done at another
+        # floor with one comparison per peak — and without re-deriving the
+        # novelty, the running median, or the peak picking, which are the parts
+        # worth duplicating badly.
+        peaks = analysis.peak_frames
         document["tracks"][track.id] = {
             "hop_s": quantize(analysis.resolution_s, 6),
             "frames": int(analysis.flux.size),
             "flux_max": quantize(float(analysis.flux.max()) if analysis.flux.size else 0.0, 2),
             "flux": [round(float(v), 2) for v in analysis.flux],
             "threshold": [round(float(v), 2) for v in analysis.threshold],
+            "peak_t": [round(i * analysis.resolution_s, 6) for i in peaks],
+            "peak_flux": [round(float(analysis.flux[i]), 6) for i in peaks],
+            "peak_adaptive": [
+                round(float(analysis.threshold[i]) - ONSET_FLUX_FLOOR, 6) for i in peaks
+            ],
+            "peak_dbfs": [round(float(analysis.frame_rms_dbfs[i]), 3) for i in peaks],
             "accepted": len(analysis.onsets),
+            "accepted_t": [o.start_s for o in analysis.onsets],
             "rejected": [
                 {
                     "start_s": c.start_s,
@@ -494,6 +510,24 @@ main { padding: 12px 18px 40px; }
 .wave canvas { display: block; width: 100%; height: 76px; }
 .lane.activity .wave canvas { height: 118px; }
 .lane.onsets .wave canvas { height: 150px; }
+.lane.raster .wave canvas { height: 86px; }
+.lane.raster .name { color: var(--dim); }
+#notebook {
+  margin-top: 14px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel);
+  padding: 12px 14px;
+}
+#notebook h2 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--interval); }
+#markList table { width: 100%; }
+#markList td { color: var(--ink); }
+#markList .drop { cursor: pointer; color: var(--dim); }
+#markList .drop:hover { color: var(--warn); }
+#markText {
+  display: none; width: 100%; height: 160px; margin-top: 8px; background: #10151a;
+  color: var(--dim); border: 1px solid var(--line); border-radius: 4px; padding: 8px;
+  font: 11px/1.5 var(--mono); resize: vertical;
+}
+input[type=range] { vertical-align: middle; accent-color: var(--hypo); }
 .name { font-weight: 600; }
 .lane.source .name { color: var(--accent); }
 .lane.stem .name { color: var(--stem); }
@@ -582,9 +616,16 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
     <span class="sep"></span>
     <label class="opt"><input type="checkbox" id="candidates" checked> show declined peaks</label>
     <span class="sep"></span>
-    <label class="opt"><input type="checkbox" id="hypo"> hypothetical thresholds</label>
+    <label class="opt"><input type="checkbox" id="hypo"> hypothetical activity thresholds</label>
     <label class="opt">enter <input type="number" id="hypoEnter" step="1"> dBFS</label>
     <label class="opt">exit <input type="number" id="hypoExit" step="1"> dBFS</label>
+  </div>
+  <div class="row">
+    <label class="opt">hypothetical onset floor
+      <input type="range" id="floor" min="0" max="60" step="0.5" style="width:220px">
+      <input type="number" id="floorValue" step="0.5" min="0"></label>
+    <button id="floorReset">reset to compiled</button>
+    <span class="clock" id="floorInfo"></span>
   </div>
   <div class="keys">
     <b>space</b> play/pause · <b>0</b> source · <b>1-4</b> model output · <b>S</b> swap stem/source
@@ -593,6 +634,7 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
     <b>-</b>/<b>=</b> zoom · <b>&larr;</b> <b>&rarr;</b> seek 5 s · <b>esc</b> clear
   </div>
   <p id="hypobanner"></p>
+  <p id="floorbanner"></p>
   <div class="keys" id="candidateCount"></div>
   <p id="status">loading…</p>
 </header>
@@ -622,6 +664,21 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
         <div class="empty" id="activityEmpty"></div>
       </div>
       <div class="wave"><canvas data-canvas="activity" height="110"></canvas></div>
+    </div>
+    <div class="lane raster" data-lane="raster">
+      <div class="head">
+        <div class="name">all outputs &middot; onset</div>
+        <div class="meta" id="rasterMeta"></div>
+        <div class="caption">
+          Every output's accepted onsets on the shared axis, so a coincidence between two of them
+          is visible without leaving the one being reviewed. Click a tick to jump to that output.
+        </div>
+        <div class="caption" style="color:var(--warn)">
+          Coincidence establishes nothing on its own. Parts played together coincide; so does
+          leakage. This lane says where to look, never what is true.
+        </div>
+      </div>
+      <div class="wave"><canvas data-canvas="raster" height="86"></canvas></div>
     </div>
     <div class="lane onsets" data-lane="onsets">
       <div class="head">
@@ -654,6 +711,22 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
     </details>
   </div>
 
+  <div id="notebook">
+    <h2>Review marks <span class="hint" id="markCount"></span></h2>
+    <p class="hint">
+      <b>M</b> marks whatever is selected, or the playhead if nothing is. Marks live in this
+      browser tab and nowhere else — the page writes nothing, to the timeline or anywhere — so
+      copy them out before you close it.
+    </p>
+    <div id="markList" class="hint">No marks yet.</div>
+    <div class="row" style="margin-top:10px">
+      <button id="copyMarks">copy marks as text</button>
+      <button id="clearMarks">clear all</button>
+      <span class="clock" id="copyState"></span>
+    </div>
+    <textarea id="markText" readonly></textarea>
+  </div>
+
   <details>
     <summary>Provenance and parameters</summary>
     <!--__ROWS__-->
@@ -677,6 +750,8 @@ LANES.forEach(id => {
 
 let timeline = null;          // the compiled document, as it is on disk
 let novelty = null;           // recomputed for review; NOT part of the timeline
+let hypoOnsets = null;        // what another floor would accept; never a claim
+let marks = [];               // this browser tab only; nothing is ever written
 let byTrack = {};             // track id -> { samples, intervals, onsets, window_s, hop_s }
 let selectedTrack = EXHIBIT.tracks[0].id;
 let listenTo = selectedTrack; // which buffer is audible
@@ -830,6 +905,89 @@ function checkOverlayAgainstDocument() {
         '. Trust the timeline, not this overlay.';
     }
   }
+}
+
+/* ---- the floor, moved hypothetically -------------------------------------
+   The compiler's rule is `flux >= median_multiplier * local_median + floor`.
+   The floor is a constant added to the adaptive half, and the adaptive half
+   travels with every peak — so asking what this same rule would have done at
+   another floor is one comparison per peak plus the minimum-gap walk.
+
+   What is NOT re-implemented here is the novelty, the running median, or the
+   peak picking. Those are the parts worth duplicating badly, and they stay in
+   Python. What is duplicated is a comparison and a gap rule, and even that is
+   checked: at the compiled floor this must reproduce the compiler's own list
+   exactly, and the banner says so when it does not. */
+function compiledFloor() { return novelty ? novelty.flux_floor : EXHIBIT.flux_floor; }
+function currentFloor() { return Number(document.getElementById('floor').value); }
+function floorIsCompiled() { return Math.abs(currentFloor() - compiledFloor()) < 1e-9; }
+
+function acceptAtFloor(nov, floor) {
+  const out = [];
+  let last = -Infinity;
+  for (let i = 0; i < nov.peak_t.length; i++) {
+    const t = nov.peak_t[i], flux = nov.peak_flux[i];
+    if (flux < nov.peak_adaptive[i] + floor) continue;
+    if (t - last < novelty.min_gap_s) continue;
+    last = t;
+    out.push({
+      start_s: t, flux, threshold: nov.peak_adaptive[i] + floor,
+      margin: flux - (nov.peak_adaptive[i] + floor),
+      local_median: nov.peak_adaptive[i], frame_rms_dbfs: nov.peak_dbfs[i], index: i,
+    });
+  }
+  return out;
+}
+function refreshFloor() {
+  const banner = document.getElementById('floorbanner');
+  const info = document.getElementById('floorInfo');
+  const nov = novelty && novelty.tracks[selectedTrack];
+  document.getElementById('floorValue').value = currentFloor();
+  if (!nov) { banner.style.display = 'none'; info.textContent = ''; return; }
+
+  hypoOnsets = floorIsCompiled() ? null : acceptAtFloor(nov, currentFloor());
+
+  // The self-check: at the compiled floor the derivation must reproduce the
+  // compiler's own accepted list, exactly, on every track.
+  let disagreement = null;
+  for (const [id, track] of Object.entries(novelty.tracks)) {
+    const mine = acceptAtFloor(track, compiledFloor()).map(o => o.start_s);
+    const theirs = track.accepted_t;
+    if (mine.length !== theirs.length ||
+        mine.some((v, k) => Math.abs(v - theirs[k]) > 1e-6)) {
+      disagreement =
+        `${id}: this page derives ${mine.length}, the compiler recorded ${theirs.length}`;
+      break;
+    }
+  }
+  if (disagreement) {
+    banner.style.display = 'block';
+    banner.classList.add('bad');
+    banner.textContent =
+      'THIS PAGE DISAGREES WITH THE COMPILER at the compiled floor (' + disagreement +
+      '). Trust the timeline, not this overlay.';
+  } else if (hypoOnsets) {
+    const compiledCount = nov.accepted;
+    banner.style.display = 'block';
+    banner.classList.remove('bad');
+    banner.textContent =
+      'HYPOTHETICAL ONSET FLOOR ' + currentFloor() + ' — the compiled floor is ' +
+      compiledFloor() + '. Dashed purple: what this same rule would additionally accept. ' +
+      'Red cross: a claim it would lose. Neither is an event, nothing has been written, and ' +
+      'the timeline is unchanged. Verified: at ' + compiledFloor() + ' this derivation ' +
+      'reproduces the compiler exactly on all four outputs.';
+    const compiledSet = new Set(nov.accepted_t);
+    const wouldSet = new Set(hypoOnsets.map(o => o.start_s));
+    const gained = hypoOnsets.filter(o => !compiledSet.has(o.start_s)).length;
+    const lost = nov.accepted_t.filter(t => !wouldSet.has(t)).length;
+    info.textContent =
+      `${hypoOnsets.length} accepted (compiled ${compiledCount}): +${gained} / -${lost}`;
+  } else {
+    banner.style.display = 'none';
+    info.textContent = 'at the compiled floor';
+  }
+  if (!hypoOnsets) info.textContent = 'at the compiled floor';
+  redraw();
 }
 
 /* ---- drawing ------------------------------------------------------------ */
@@ -1027,11 +1185,76 @@ function drawOnsets() {
     g.beginPath(); g.moveTo(x, 2); g.lineTo(x, markerBottom); g.stroke();
     g.lineWidth = 1;
   });
+
+  // What another floor would do, in both directions, because a floor that is
+  // moved down gains events and a floor that is moved up loses them, and only
+  // seeing one of those would make the control quietly one-sided.
+  if (hypoOnsets) {
+    const compiled = new Set(data.onsets.map(e => e.start_s));
+    const would = new Set(hypoOnsets.map(o => o.start_s));
+
+    g.save();
+    g.setLineDash([2, 2]);
+    hypoOnsets.forEach(o => {
+      if (compiled.has(o.start_s)) return;          // already drawn, solid, as a claim
+      const x = xOf(o.start_s, w);
+      if (x < -2 || x > w + 2) return;
+      const chosen = selection && selection.kind === 'hypothetical' && selection.event === o;
+      g.strokeStyle = chosen ? '#ffffff' : '#c99bd8';
+      g.lineWidth = chosen ? 2 : 1.5;
+      g.beginPath(); g.moveTo(x, 2); g.lineTo(x, markerBottom); g.stroke();
+    });
+    g.restore();
+    g.lineWidth = 1;
+
+    // Claims this floor would have lost, struck through where they stand.
+    data.onsets.forEach(e => {
+      if (would.has(e.start_s)) return;
+      const x = xOf(e.start_s, w);
+      if (x < -2 || x > w + 2) return;
+      g.strokeStyle = '#e0776a';
+      g.beginPath();
+      g.moveTo(x - 4, markerBottom / 2 - 4); g.lineTo(x + 4, markerBottom / 2 + 4);
+      g.moveTo(x + 4, markerBottom / 2 - 4); g.lineTo(x - 4, markerBottom / 2 + 4);
+      g.stroke();
+    });
+  }
+}
+
+/* ---- every output on one axis ------------------------------------------ */
+const RASTER_COLOURS = ['#e0a76a', '#7aa7ff', '#7fd18a', '#c99bd8'];
+function drawRaster() {
+  const { g, w, h } = canvasFor('raster');
+  if (!timeline) return;
+  const rows = timeline.tracks.length;
+  const rowH = h / rows;
+  timeline.tracks.forEach((track, r) => {
+    const mine = track.id === selectedTrack;
+    const top = r * rowH + 4, bottom = (r + 1) * rowH - 4;
+    g.fillStyle = mine ? 'rgba(255,255,255,.045)' : 'transparent';
+    if (mine) g.fillRect(0, r * rowH, w, rowH);
+    g.strokeStyle = '#161c22'; g.beginPath();
+    g.moveTo(0, (r + 1) * rowH - .5); g.lineTo(w, (r + 1) * rowH - .5); g.stroke();
+
+    g.strokeStyle = RASTER_COLOURS[r % RASTER_COLOURS.length];
+    g.globalAlpha = mine ? 1 : 0.5;
+    track.events.forEach(e => {
+      if (e.type !== 'onset') return;
+      const x = xOf(e.start_s, w);
+      if (x < -1 || x > w + 1) return;
+      g.beginPath(); g.moveTo(x, top); g.lineTo(x, bottom); g.stroke();
+    });
+    g.globalAlpha = 1;
+    g.fillStyle = mine ? '#d7dee5' : '#5d6b7a';
+    g.font = '10px ui-monospace, monospace';
+    g.fillText(track.id.split('.').pop(), 4, r * rowH + 12);
+  });
 }
 function redraw() {
   drawWave('source', 'source', '#6fd0c0');
   drawWave('stem', selectedTrack, '#7aa7ff');
   drawActivity();
+  drawRaster();
   drawOnsets();
   draw();
 }
@@ -1113,11 +1336,32 @@ function describeCandidate(c) {
     ['recomputed by', novelty.tool + ' at the parameters recorded in the timeline'],
   ];
 }
+function describeHypothetical(o) {
+  return [
+    ['what this is',
+     'A HYPOTHETICAL ACCEPTANCE at floor ' + currentFloor() + ' — not an event, and not in the ' +
+     'timeline. The compiled floor is ' + compiledFloor() + '.'],
+    ['start_s', o.start_s.toFixed(6)],
+    ['novelty (flux)', String(o.flux)],
+    ['threshold at this floor', o.threshold.toFixed(6)],
+    ['margin', o.margin.toFixed(6)],
+    ['adaptive term', o.local_median.toFixed(6) + '  (unchanged by the floor)'],
+    ['frame_rms_dbfs', String(o.frame_rms_dbfs)],
+    ['in the timeline?',
+     'only if the compiled floor also accepted it — otherwise this is a what-if'],
+  ];
+}
 function select(kind, event, index) {
   selection = { kind, event, index };
   const candidate = kind === 'candidate';
-  const rows = candidate ? describeCandidate(event) : describe(kind, event);
-  const banner = candidate
+  const rows = kind === 'hypothetical'
+    ? describeHypothetical(event)
+    : (candidate ? describeCandidate(event) : describe(kind, event));
+  const banner = kind === 'hypothetical'
+    ? '<p class="hint" style="color:var(--hypo)"><b>This is a what-if.</b> No event ' +
+      'for it exists in song.timeline.json unless the compiled floor accepted it too. ' +
+      'Nothing has been written and the timeline is unchanged.</p>'
+    : candidate
     ? '<p class="hint" style="color:var(--warn)"><b>This is not a claim.</b> The rule declined ' +
       'this peak, so no event for it exists in song.timeline.json. It is shown so the detector ' +
       'can be judged on what it turned down.</p>'
@@ -1139,7 +1383,7 @@ function escapeHtml(s) {
 function audition() {
   if (!selection) return;
   const e = selection.event;
-  if (selection.kind === 'onset' || selection.kind === 'candidate') {
+  if (selection.kind !== 'interval') {
     const pre = Number(document.getElementById('pre').value) / 1000;
     const post = Number(document.getElementById('post').value) / 1000;
     loop = { a: Math.max(0, e.start_s - pre), b: Math.min(duration, e.start_s + post) };
@@ -1158,6 +1402,7 @@ function listFor(kind) {
   if (!data) return [];
   if (kind === 'onset') return data.onsets;
   if (kind === 'interval') return data.intervals;
+  if (kind === 'hypothetical') return hypoOnsets || [];
   const nov = novelty && novelty.tracks[selectedTrack];
   return nov ? nov.rejected : [];
 }
@@ -1183,7 +1428,7 @@ function pickAt(time, kind) {
   const data = byTrack[selectedTrack];
   if (!data) return false;
   const tolerance = (view.b - view.a) * 0.01;
-  if (kind === 'onset' || kind === 'candidate') {
+  if (kind !== 'interval') {
     const list = listFor(kind);
     let best = null, bestIndex = -1;
     list.forEach((e, i) => {
@@ -1198,6 +1443,65 @@ function pickAt(time, kind) {
   const i = data.intervals.findIndex(e => time >= e.start_s && time <= e.end_s);
   if (i >= 0) { select('interval', data.intervals[i], i); return true; }
   return false;
+}
+
+/* ---- the review notebook -------------------------------------------------
+   In this browser tab and nowhere else. The page has no writer, and marking a
+   claim must not become a way to acquire one: what accumulates here is a
+   reviewer's own notes, and the only way out is the clipboard. */
+function markLabel(kind) {
+  return { onset: 'onset', interval: 'activity.interval', candidate: 'declined peak',
+           hypothetical: 'what-if at floor ' + currentFloor(), moment: 'moment' }[kind] || kind;
+}
+function addMark() {
+  const at = selection ? selection.event.start_s : position();
+  const kind = selection ? selection.kind : 'moment';
+  const e = selection ? selection.event : null;
+  const numbers = [];
+  if (e && e.payload) {
+    if (e.payload.flux !== undefined) {
+      numbers.push(`flux ${e.payload.flux}`, `threshold ${e.payload.threshold}`,
+                   `margin ${e.payload.margin}`, `${e.payload.frame_rms_dbfs} dBFS`);
+    } else if (e.payload.mean_rms_dbfs !== undefined) {
+      numbers.push(`${e.start_s.toFixed(3)}-${e.end_s.toFixed(3)} s`,
+                   `mean ${e.payload.mean_rms_dbfs} dBFS`,
+                   `merged_gaps ${e.payload.merged_gaps}`);
+    }
+  } else if (e) {
+    numbers.push(`flux ${e.flux}`, `threshold ${(e.threshold).toFixed(2)}`,
+                 `margin ${(e.margin).toFixed(2)}`, `${e.frame_rms_dbfs} dBFS`);
+    if (e.reason) numbers.push(e.reason);
+  }
+  marks.push({ t: at, track: selectedTrack, kind, numbers, note: '' });
+  marks.sort((a, b) => a.t - b.t || a.track.localeCompare(b.track));
+  renderMarks();
+}
+function renderMarks() {
+  document.getElementById('markCount').textContent = marks.length ? `(${marks.length})` : '';
+  const list = document.getElementById('markList');
+  if (!marks.length) { list.innerHTML = 'No marks yet.'; return; }
+  list.innerHTML = '<table>' + marks.map((m, i) =>
+    `<tr><th>${fmt(m.t)}</th><td>${escapeHtml(m.track.split('.').pop())}</td>` +
+    `<td>${escapeHtml(markLabel(m.kind))}</td>` +
+    `<td>${escapeHtml(m.numbers.join(' · '))}</td>` +
+    `<td class="drop" data-drop="${i}">remove</td></tr>`).join('') + '</table>';
+  list.querySelectorAll('[data-drop]').forEach(el => {
+    el.onclick = () => { marks.splice(Number(el.dataset.drop), 1); renderMarks(); };
+  });
+}
+function marksAsText() {
+  const head = [
+    `# Review marks — ${EXHIBIT.specimen_id}`,
+    `timeline sha256 ${novelty ? novelty.timeline_sha256 : '(unknown)'}`,
+    `compiled onset floor ${compiledFloor()}`,
+    '',
+    '| time | output | what | numbers |',
+    '| --- | --- | --- | --- |',
+  ];
+  const rows = marks.map(m =>
+    `| ${fmt(m.t)} (${m.t.toFixed(3)} s) | ${m.track.split('.').pop()} | ` +
+    `${markLabel(m.kind)} | ${m.numbers.join(' · ')} |`);
+  return head.concat(rows).join('\\n') + '\\n';
 }
 
 /* ---- wiring ------------------------------------------------------------- */
@@ -1244,7 +1548,7 @@ function selectTrack(id) {
   document.getElementById('rawWrap').style.display = 'none';
   applyGains();
   checkOverlayAgainstDocument();
-  redraw();
+  if (novelty) refreshFloor(); else redraw();
 }
 document.getElementById('play').onclick = toggle;
 document.getElementById('stop').onclick = () => { pause(); offset = 0; draw(); };
@@ -1259,6 +1563,35 @@ document.getElementById('prevInterval').onclick = () => step('interval', -1);
 document.getElementById('nextCandidate').onclick = () => step('candidate', +1);
 document.getElementById('prevCandidate').onclick = () => step('candidate', -1);
 document.getElementById('candidates').addEventListener('input', redraw);
+document.getElementById('floor').addEventListener('input', refreshFloor);
+document.getElementById('floorValue').addEventListener('input', () => {
+  document.getElementById('floor').value = document.getElementById('floorValue').value;
+  refreshFloor();
+});
+document.getElementById('floorReset').onclick = () => {
+  document.getElementById('floor').value = compiledFloor();
+  refreshFloor();
+};
+document.getElementById('copyMarks').onclick = async () => {
+  const text = marksAsText();
+  const area = document.getElementById('markText');
+  area.style.display = 'block';
+  area.value = text;
+  const state = document.getElementById('copyState');
+  try {
+    await navigator.clipboard.writeText(text);
+    state.textContent = 'copied ' + marks.length + ' mark(s)';
+  } catch (err) {
+    area.select();
+    state.textContent = 'select the text below and copy it';
+  }
+  setTimeout(() => { state.textContent = ''; }, 4000);
+};
+document.getElementById('clearMarks').onclick = () => {
+  marks = [];
+  document.getElementById('markText').style.display = 'none';
+  renderMarks();
+};
 function swapListening() {
   listeningToSource = !listeningToSource;
   listenTo = listeningToSource ? 'source' : selectedTrack;
@@ -1284,12 +1617,25 @@ document.getElementById('hit').onclick = e => {
   const laneTop = document.querySelector('[data-canvas="onsets"]').getBoundingClientRect();
   const onOnsetLane = e.clientY >= laneTop.top && e.clientY <= laneTop.bottom;
   if (onOnsetLane) {
-    // An accepted onset wins a tie with a declined peak: the claim is what the
-    // page is primarily about, and the declined peak is context for it.
+    // An accepted onset wins a tie: the claim is what the page is primarily
+    // about, and everything else in this lane is context for it.
     if (pickAt(t, 'onset')) { audition(); return; }
+    if (hypoOnsets && pickAt(t, 'hypothetical')) { audition(); return; }
     if (document.getElementById('candidates').checked && pickAt(t, 'candidate')) {
       audition(); return;
     }
+  }
+  const raster = document.querySelector('[data-canvas="raster"]').getBoundingClientRect();
+  if (e.clientY >= raster.top && e.clientY <= raster.bottom && timeline) {
+    const row = Math.floor(((e.clientY - raster.top) / raster.height) * timeline.tracks.length);
+    const track = timeline.tracks[Math.max(0, Math.min(timeline.tracks.length - 1, row))];
+    if (track) {
+      listeningToSource = false;
+      selectTrack(track.id);
+      if (pickAt(t, 'onset')) { audition(); return; }
+    }
+    seek(t);
+    return;
   }
   const actTop = document.querySelector('[data-canvas="activity"]').getBoundingClientRect();
   if (e.clientY >= actTop.top && e.clientY <= actTop.bottom && pickAt(t, 'interval')) {
@@ -1315,6 +1661,7 @@ window.addEventListener('keydown', e => {
   if (k === 'I') { step('interval', -1); return; }
   if (k === 'r') { step('candidate', +1); return; }
   if (k === 'R') { step('candidate', -1); return; }
+  if (k === 'm' || k === 'M') { addMark(); return; }
   if (k === 'N') { step('onset', -1); return; }
   if (k === 'Enter') { audition(); return; }
   if (k === '[') { loop.a = position(); normaliseLoop(); return; }
@@ -1376,8 +1723,14 @@ const status = document.getElementById('status');
     EXHIBIT.source.path + '  ' + EXHIBIT.source.hash;
   document.getElementById('hypoEnter').value = RULE.enter_dbfs;
   document.getElementById('hypoExit').value = RULE.exit_dbfs;
+  document.getElementById('floor').value = novelty.flux_floor;
+  document.getElementById('rasterMeta').textContent =
+    timeline.tracks.map(t => `${t.id.split('.').pop()} ` +
+      `${t.events.filter(e => e.type === 'onset').length}`).join(' · ');
+  renderMarks();
   status.style.display = 'none';
   selectTrack(selectedTrack);
+  refreshFloor();
 })();
 frame();
 </script>
