@@ -574,3 +574,36 @@ def test_an_audition_loop_inside_the_view_does_not_page(tmp_path: Path) -> None:
     """Which is what lets auditioning a claim and following a passage coexist."""
     page = render(exhibit_for(tmp_path)[0])
     assert "A loop that fits inside the view never pages" in page
+
+
+def test_a_loop_region_can_be_dragged_out(tmp_path: Path) -> None:
+    """Specifying a region visually beats four keystrokes, and on a track that
+    is one long interval it is the only way to work at all."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "pointerdown" in page and "pointerup" in page
+    assert "setPointerCapture" in page
+    assert "so a finger works the same as a" in page
+
+
+def test_a_drag_and_a_click_are_separated_by_distance(tmp_path: Path) -> None:
+    """They arrive as the same event sequence; only the distance differs."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "const DRAG_SLOP = 4;" in page
+    assert "the click that follows the release is suppressed" in page
+
+
+def test_the_suppression_flag_cannot_outlive_its_gesture(tmp_path: Path) -> None:
+    """A release outside the strip produces no click, and a flag left standing
+    would swallow the next legitimate one."""
+    page = render(exhibit_for(tmp_path)[0])
+    assert "would swallow the" in page
+    assert "suppressClick = false;\n  drag = {" in page
+
+
+def test_a_selection_in_progress_looks_different_from_a_committed_loop(
+    tmp_path: Path,
+) -> None:
+    page = render(exhibit_for(tmp_path)[0])
+    assert "dragsel" in page
+    assert "letting go is visibly the thing that commits it" in page
+    assert "selecting ${Math.abs(drag.to - drag.from).toFixed(2)} s" in page

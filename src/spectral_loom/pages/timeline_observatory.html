@@ -110,6 +110,13 @@ input[type=range] { vertical-align: middle; accent-color: var(--hypo); }
   position: absolute; top: 0; bottom: 0; width: 0;
   border-left: 1px dashed rgba(111,208,192,.8); display: none;
 }
+/* A selection in progress, drawn differently from a committed loop so that
+   letting go is visibly the thing that commits it. */
+#dragsel {
+  position: absolute; top: 0; bottom: 0; background: rgba(201,155,216,.12);
+  border-left: 1px dashed rgba(201,155,216,.9); border-right: 1px dashed rgba(201,155,216,.9);
+  display: none;
+}
 #inspector {
   margin-top: 18px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel);
   padding: 12px 14px;
@@ -267,7 +274,7 @@ th { color: var(--dim); width: 26ch; white-space: nowrap; }
       </div>
       <div class="wave"><canvas data-canvas="onsets" height="80"></canvas></div>
     </div>
-    <div id="overlay"><div id="loop"></div><div id="loopin-mark"></div><div id="playhead"></div></div>
+    <div id="overlay"><div id="loop"></div><div id="dragsel"></div><div id="loopin-mark"></div><div id="playhead"></div></div>
     <div id="hit"></div>
   </div>
 
@@ -878,6 +885,13 @@ function draw() {
     el.style.left = `${xOf(loop.a, w)}px`;
     el.style.width = `${Math.max(1, xOf(loop.b, w) - xOf(loop.a, w))}px`;
   } else el.style.display = 'none';
+  const sel = document.getElementById('dragsel');
+  if (drag && drag.moved && drag.to !== null) {
+    const a = Math.min(drag.from, drag.to), b = Math.max(drag.from, drag.to);
+    sel.style.display = 'block';
+    sel.style.left = `${xOf(a, w)}px`;
+    sel.style.width = `${Math.max(1, xOf(b, w) - xOf(a, w))}px`;
+  } else sel.style.display = 'none';
   // A pending in point, waiting for its out point. Without it, pressing `[`
   // looks like nothing happened.
   const pending = document.getElementById('loopin-mark');
@@ -886,8 +900,11 @@ function draw() {
     pending.style.left = `${xOf(loop.a, w)}px`;
   } else pending.style.display = 'none';
   const loopText = looping() ? `  loop ${fmt(loop.a)} - ${fmt(loop.b)}` : '';
-  const pendingText = (loop.a !== null && loop.b === null)
+  let pendingText = (loop.a !== null && loop.b === null)
     ? `  loop in ${fmt(loop.a)}, press ] for the out point` : '';
+  if (drag && drag.moved && drag.to !== null) {
+    pendingText = `  selecting ${Math.abs(drag.to - drag.from).toFixed(2)} s`;
+  }
   document.getElementById('viewinfo').textContent =
     ((view.b - view.a >= duration - 0.01)
       ? 'whole file' + loopText
@@ -1358,7 +1375,54 @@ document.querySelectorAll('#tracks button').forEach(b => {
     checkOverlayAgainstDocument(); redraw();
   });
 });
+/* ---- drag a loop region ---------------------------------------------------
+   Pointer events rather than mouse events, so a finger works the same as a
+   cursor, and pointer capture so a drag that wanders outside the strip still
+   ends where it was released.
+
+   A drag and a click arrive as the same sequence, so they are separated by
+   distance: under DRAG_SLOP pixels the gesture falls through to the existing
+   click behaviour — seek, or pick the onset or interval under the cursor —
+   and over it, the click that follows the release is suppressed. */
+const DRAG_SLOP = 4;
+let drag = null, suppressClick = false;
+
+function timeAtEvent(e) {
+  const strip = document.getElementById('hit').getBoundingClientRect();
+  return Math.max(0, Math.min(duration, tOf(e.clientX - strip.left, strip.width)));
+}
+document.getElementById('hit').addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  e.currentTarget.setPointerCapture(e.pointerId);
+  // Cleared here rather than only when a click consumes it: a release outside
+  // the strip produces no click, and a flag left standing would swallow the
+  // next legitimate one instead.
+  suppressClick = false;
+  drag = { x: e.clientX, from: timeAtEvent(e), to: null, moved: false };
+});
+document.getElementById('hit').addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (!drag.moved && Math.abs(e.clientX - drag.x) <= DRAG_SLOP) return;
+  drag.moved = true;
+  drag.to = timeAtEvent(e);
+  draw();
+});
+document.getElementById('hit').addEventListener('pointerup', e => {
+  if (!drag) return;
+  const gesture = drag;
+  drag = null;
+  if (!gesture.moved) { draw(); return; }
+  suppressClick = true;
+  const a = Math.min(gesture.from, gesture.to), b = Math.max(gesture.from, gesture.to);
+  // A drag too short to be deliberate leaves the loop alone rather than
+  // creating one nobody could hear.
+  if (b - a >= 0.02) { loop = { a, b }; restart(); }
+  draw();
+});
+document.getElementById('hit').addEventListener('pointercancel', () => { drag = null; draw(); });
+
 document.getElementById('hit').onclick = e => {
+  if (suppressClick) { suppressClick = false; return; }
   const r = e.currentTarget.getBoundingClientRect();
   const t = tOf(e.clientX - r.left, r.width);
   const laneTop = document.querySelector('[data-canvas="onsets"]').getBoundingClientRect();
